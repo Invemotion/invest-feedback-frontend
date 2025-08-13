@@ -1,12 +1,10 @@
 // lib/Calendar/daydetailpage.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-
+import 'package:dio/dio.dart'; // ← 추가
 import '../../Tools/Appbar/MyAppBar.dart';
 import '../../Tools/Color/Colors.dart';
-
 import 'package:flutter/services.dart';
-import 'package:dio/dio.dart'; // ← 이거 추가
 
 class DayDetailPage extends StatefulWidget {
   const DayDetailPage({
@@ -25,6 +23,7 @@ class DayDetailPage extends StatefulWidget {
 class _DayDetailPageState extends State<DayDetailPage> {
   late final List<TextEditingController> _controllers;
 
+  // 감정/행동 한글 라벨
   final List<String> _emotions = [
     '기대', '확신', '불안', '기쁨', '후회', '무감정', '아쉬움'
   ];
@@ -33,6 +32,28 @@ class _DayDetailPageState extends State<DayDetailPage> {
     '전략적 정리', '분할매도', '조기매도',
     '손절지연', '시장 추종', '불안정 매도'
   ];
+
+  // 백엔드 ENUM → 한글 라벨 매핑
+  final Map<String, String> emotionMap = {
+    "EXPECTATION": "기대",
+    "CERTAINTY": "확신",
+    "ANXIETY": "불안",
+    "JOY": "기쁨",
+    "REMORSE": "후회",
+    "NEUTRAL": "무감정",
+    "REGRET": "아쉬움",
+  };
+  final Map<String, String> behaviorMap = {
+    "CHASING_BUY": "추격매수",
+    "DIVIDED_ENTRY": "분할진입",
+    "EMOTIONAL_ENTRY": "감정적 진입",
+    "STRATEGIC_EXIT": "전략적 정리",
+    "DIVIDED_SELL": "분할매도",
+    "EARLY_SELL": "조기매도",
+    "DELAYED_STOP": "손절지연",
+    "MARKET_FOLLOW": "시장 추종",
+    "UNSTABLE_SELL": "불안정 매도",
+  };
 
   late final List<List<bool>> _emotionsSelected;
   late final List<List<bool>> _actionsSelected;
@@ -56,9 +77,11 @@ class _DayDetailPageState extends State<DayDetailPage> {
   }
 
   Future<void> _loadJournals() async {
-    final dioClient = Dio(); // Dio 인스턴스 생성
+    final dioClient = Dio();
     for (int i = 0; i < widget.schedules.length; i++) {
       final tradeId = widget.schedules[i]['tradeId'];
+      if (tradeId == null) continue;
+
       final resp = await dioClient.get(
         'http://13.124.208.84:8080/api/journals/$tradeId',
         options: Options(headers: {'X-User-id': '2'}),
@@ -70,16 +93,18 @@ class _DayDetailPageState extends State<DayDetailPage> {
         _setSelectedFromEnum(i, data['emotion'], data['behavior']);
       }
     }
+    setState(() {}); // UI 반영
   }
 
-
   void _setSelectedFromEnum(int i, String? emotion, String? behavior) {
-    if (emotion != null) {
-      final idx = _emotions.indexWhere((e) => e == emotion);
+    if (emotion != null && emotionMap.containsKey(emotion)) {
+      final label = emotionMap[emotion]!;
+      final idx = _emotions.indexOf(label);
       if (idx != -1) _emotionsSelected[i][idx] = true;
     }
-    if (behavior != null) {
-      final idx = _actions.indexWhere((a) => a == behavior);
+    if (behavior != null && behaviorMap.containsKey(behavior)) {
+      final label = behaviorMap[behavior]!;
+      final idx = _actions.indexOf(label);
       if (idx != -1) _actionsSelected[i][idx] = true;
     }
   }
@@ -129,7 +154,6 @@ class _DayDetailPageState extends State<DayDetailPage> {
 
   Widget _buildScheduleTile(int i) {
     final s = widget.schedules[i];
-    final hasJournal = (s['hasJournal'] == 'true');
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -160,9 +184,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
             ),
             child: SingleChildScrollView(
               padding: EdgeInsets.zero,
-              child: hasJournal
-                  ? _buildSavedJournal(s)
-                  : _buildWriteJournal(i),
+              child: _buildWriteJournal(i), // 작성 UI 유지, 불러온 값 반영됨
             ),
           ),
         ],
@@ -170,46 +192,6 @@ class _DayDetailPageState extends State<DayDetailPage> {
     );
   }
 
-  /// 저장된 매매일지 보여주는 UI
-  Widget _buildSavedJournal(Map<String, String> s) {
-    return Padding(
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            '매매일지',
-            style: TextStyle(
-              fontFamily: 'KBFGText',
-              fontWeight: FontWeight.w700,
-              fontSize: 14,
-              color: MainColors.kbDarkGray,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            s['journalText'] ?? '(내용 없음)',
-            style: const TextStyle(
-              fontFamily: 'KBFGText',
-              fontSize: 13,
-              color: MainColors.kbDarkGray,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '감정: ${s['emotion'] ?? '-'}',
-            style: const TextStyle(fontSize: 13, color: Colors.black54),
-          ),
-          Text(
-            '행동: ${s['behavior'] ?? '-'}',
-            style: const TextStyle(fontSize: 13, color: Colors.black54),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 기존 작성 UI
   Widget _buildWriteJournal(int i) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
