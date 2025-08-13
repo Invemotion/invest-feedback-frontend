@@ -1,10 +1,3 @@
-// import 'package:flutter/material.dart';
-//
-// class MainColors {
-//   static const Color background = Color(0xfff2f2f2);
-//   static const Color blue = Color(0xff4169e1);
-// }
-
 import 'package:flutter/material.dart';
 
 /// 브랜드 컬러 및 시트 컬러 정의

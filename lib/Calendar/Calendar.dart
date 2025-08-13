@@ -7,7 +7,6 @@ import '../../Tools/Appbar/MyAppBar.dart';
 import '../../Tools/Color/Colors.dart';
 import 'daydetailpage.dart';
 
-/// 리포트 종류
 enum ReportType { day, month, year }
 
 class Calendar extends StatefulWidget {
@@ -234,7 +233,7 @@ class _CalendarState extends State<Calendar> {
                   _reportType == ReportType.day
                       ? '일별 리포트 내용\n입니다'
                       : _reportType == ReportType.month
-                      ? '월별 리포트 내용'
+                      ? '월별 리포트 내용\n월별 리포트 내용\n월별 리포트 내용\n월별 리포트 내용\n월별 리포트 내용\n월별 리포트 내용\n월별 리포트 내용\n월별 리포트 내용\n'
                       : '연간 리포트 내용',
                   textAlign: TextAlign.center,
                   style: const TextStyle(

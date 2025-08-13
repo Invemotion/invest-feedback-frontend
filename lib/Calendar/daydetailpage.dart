@@ -1,4 +1,6 @@
-// lib/Home/Calendar/daydetailpage.dart
+// TODO: 일지가 있다면 위에 AI 분석 리포트 받아보기 창이 뜨기
+// TODO: 버튼 누르면, 팝업(?)으로 AI 분석 중.. 이런거 뜨고, 완료 되면 리포트가 맨 위에 뜸
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -137,7 +139,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Padding(
-                    padding: EdgeInsets.only(left: 8, bottom: 0),
+                    padding: EdgeInsets.only(left: 8, bottom: 0, top: 8),
                     child: Text(
                       '매매일지',
                       style: TextStyle(
@@ -150,7 +152,6 @@ class _DayDetailPageState extends State<DayDetailPage> {
                   ),
 
                   _buildDiaryField(i),
-                  const SizedBox(height: 4),
 
                   // ── 감정 칩 ──
                   _buildChipSection(
