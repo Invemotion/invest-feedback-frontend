@@ -1,6 +1,4 @@
-// TODO: 일지가 있다면 위에 AI 분석 리포트 받아보기 창이 뜨기
-// TODO: 버튼 누르면, 팝업(?)으로 AI 분석 중.. 이런거 뜨고, 완료 되면 리포트가 맨 위에 뜸
-
+// lib/Calendar/daydetailpage.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -8,6 +6,7 @@ import '../../Tools/Appbar/MyAppBar.dart';
 import '../../Tools/Color/Colors.dart';
 
 import 'package:flutter/services.dart';
+import 'package:dio/dio.dart'; // ← 이거 추가
 
 class DayDetailPage extends StatefulWidget {
   const DayDetailPage({
@@ -24,7 +23,6 @@ class DayDetailPage extends StatefulWidget {
 }
 
 class _DayDetailPageState extends State<DayDetailPage> {
-  // ── data ────────────────────────────────────────────────────────────────
   late final List<TextEditingController> _controllers;
 
   final List<String> _emotions = [
@@ -36,11 +34,9 @@ class _DayDetailPageState extends State<DayDetailPage> {
     '손절지연', '시장 추종', '불안정 매도'
   ];
 
-  /// **종목별** 선택 상태: schedules.length × chip.length
   late final List<List<bool>> _emotionsSelected;
   late final List<List<bool>> _actionsSelected;
 
-  // ── lifecycle ───────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
@@ -55,6 +51,37 @@ class _DayDetailPageState extends State<DayDetailPage> {
       widget.schedules.length,
           (_) => List<bool>.filled(_actions.length, false),
     );
+
+    _loadJournals();
+  }
+
+  Future<void> _loadJournals() async {
+    final dioClient = Dio(); // Dio 인스턴스 생성
+    for (int i = 0; i < widget.schedules.length; i++) {
+      final tradeId = widget.schedules[i]['tradeId'];
+      final resp = await dioClient.get(
+        'http://13.124.208.84:8080/api/journals/$tradeId',
+        options: Options(headers: {'X-User-id': '2'}),
+      );
+
+      final data = resp.data['data'];
+      if (data != null && data.isNotEmpty) {
+        _controllers[i].text = data['reason'] ?? '';
+        _setSelectedFromEnum(i, data['emotion'], data['behavior']);
+      }
+    }
+  }
+
+
+  void _setSelectedFromEnum(int i, String? emotion, String? behavior) {
+    if (emotion != null) {
+      final idx = _emotions.indexWhere((e) => e == emotion);
+      if (idx != -1) _emotionsSelected[i][idx] = true;
+    }
+    if (behavior != null) {
+      final idx = _actions.indexWhere((a) => a == behavior);
+      if (idx != -1) _actionsSelected[i][idx] = true;
+    }
   }
 
   @override
@@ -65,7 +92,6 @@ class _DayDetailPageState extends State<DayDetailPage> {
     super.dispose();
   }
 
-  // ── build ───────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final title = DateFormat('yyyy년 M월 d일').format(widget.date);
@@ -82,7 +108,6 @@ class _DayDetailPageState extends State<DayDetailPage> {
     );
   }
 
-  // ── small widgets ───────────────────────────────────────────────────────
   Widget _buildEmpty() => Center(
     child: Column(
       mainAxisSize: MainAxisSize.min,
@@ -104,6 +129,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
 
   Widget _buildScheduleTile(int i) {
     final s = widget.schedules[i];
+    final hasJournal = (s['hasJournal'] == 'true');
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -128,69 +154,104 @@ class _DayDetailPageState extends State<DayDetailPage> {
           ),
         ),
         children: [
-          // ── 내용 영역: 최대 화면 60% 높이 + 내부 스크롤 ──
           ConstrainedBox(
             constraints: BoxConstraints(
               maxHeight: MediaQuery.of(context).size.height * 0.6,
             ),
             child: SingleChildScrollView(
               padding: EdgeInsets.zero,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.only(left: 8, bottom: 0, top: 8),
-                    child: Text(
-                      '매매일지',
-                      style: TextStyle(
-                        fontFamily: 'KBFGText',
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                        color: MainColors.kbDarkGray,
-                      ),
-                    ),
-                  ),
-
-                  _buildDiaryField(i),
-
-                  // ── 감정 칩 ──
-                  _buildChipSection(
-                    title: '감정',
-                    items: _emotions,
-                    selected: _emotionsSelected[i],
-                    chipPadding:
-                    const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-                    labelPadding:
-                    const EdgeInsets.symmetric(horizontal: 8),
-                    chipSpacing: 3,
-                    chipRunSpacing: 2,
-                    onTap: (chipIdx, sel) =>
-                        setState(() => _emotionsSelected[i][chipIdx] = sel),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // ── 행동 칩 ──
-                  _buildChipSection(
-                    title: '행동',
-                    items: _actions,
-                    selected: _actionsSelected[i],
-                    chipPadding:
-                    const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-                    labelPadding:
-                    const EdgeInsets.symmetric(horizontal: 7),
-                    onTap: (chipIdx, sel) =>
-                        setState(() => _actionsSelected[i][chipIdx] = sel),
-                  ),
-                  const SizedBox(height: 16),
-
-                  _buildDoneButton(),
-                  const Divider(),
-                ],
-              ),
+              child: hasJournal
+                  ? _buildSavedJournal(s)
+                  : _buildWriteJournal(i),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  /// 저장된 매매일지 보여주는 UI
+  Widget _buildSavedJournal(Map<String, String> s) {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '매매일지',
+            style: TextStyle(
+              fontFamily: 'KBFGText',
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
+              color: MainColors.kbDarkGray,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            s['journalText'] ?? '(내용 없음)',
+            style: const TextStyle(
+              fontFamily: 'KBFGText',
+              fontSize: 13,
+              color: MainColors.kbDarkGray,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '감정: ${s['emotion'] ?? '-'}',
+            style: const TextStyle(fontSize: 13, color: Colors.black54),
+          ),
+          Text(
+            '행동: ${s['behavior'] ?? '-'}',
+            style: const TextStyle(fontSize: 13, color: Colors.black54),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 기존 작성 UI
+  Widget _buildWriteJournal(int i) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(left: 8, bottom: 0, top: 8),
+          child: Text(
+            '매매일지',
+            style: TextStyle(
+              fontFamily: 'KBFGText',
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
+              color: MainColors.kbDarkGray,
+            ),
+          ),
+        ),
+        _buildDiaryField(i),
+        _buildChipSection(
+          title: '감정',
+          items: _emotions,
+          selected: _emotionsSelected[i],
+          chipPadding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+          labelPadding: const EdgeInsets.symmetric(horizontal: 8),
+          chipSpacing: 3,
+          chipRunSpacing: 2,
+          onTap: (chipIdx, sel) =>
+              setState(() => _emotionsSelected[i][chipIdx] = sel),
+        ),
+        const SizedBox(height: 12),
+        _buildChipSection(
+          title: '행동',
+          items: _actions,
+          selected: _actionsSelected[i],
+          chipPadding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+          labelPadding: const EdgeInsets.symmetric(horizontal: 7),
+          onTap: (chipIdx, sel) =>
+              setState(() => _actionsSelected[i][chipIdx] = sel),
+        ),
+        const SizedBox(height: 16),
+        _buildDoneButton(),
+        const Divider(),
+      ],
     );
   }
 
@@ -199,13 +260,12 @@ class _DayDetailPageState extends State<DayDetailPage> {
     child: TextField(
       controller: _controllers[i],
       maxLines: null,
-      maxLength: 100,                               // ← 100자 제한
+      maxLength: 100,
       maxLengthEnforcement: MaxLengthEnforcement.enforced,
       buildCounter: (ctx,
           {required int currentLength,
             required bool isFocused,
             required int? maxLength}) {
-        // 왼쪽 정렬 카운터
         return Padding(
           padding: const EdgeInsets.only(left: 4, top: 2),
           child: Text(
@@ -235,8 +295,6 @@ class _DayDetailPageState extends State<DayDetailPage> {
     ),
   );
 
-
-  // --- 재사용 Chip section --------------------------------------------------
   Widget _buildChipSection({
     required String title,
     required List<String> items,
@@ -302,7 +360,8 @@ class _DayDetailPageState extends State<DayDetailPage> {
         elevation: 1,
         shadowColor: Colors.black26,
         minimumSize: const Size(96, 38),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        padding:
+        const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
           side: BorderSide.none,
@@ -314,7 +373,6 @@ class _DayDetailPageState extends State<DayDetailPage> {
         ),
       ),
       onPressed: () {
-        // TODO: 상태 저장 로직
         setState(() {});
       },
       child: const Text('완료'),

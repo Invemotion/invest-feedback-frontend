@@ -3,17 +3,22 @@ import 'package:intl/intl.dart';
 import 'api_client.dart';
 
 class TradeItem {
+  final int id;                // trade PK
   final String title;
   final DateTime completedTime;
+  final bool hasJournal;
+  final int? journalId;
 
   TradeItem({
+    required this.id,
     required this.title,
     required this.completedTime,
+    required this.hasJournal,
+    required this.journalId,
   });
 
   factory TradeItem.fromJson(Map<String, dynamic> json) {
     final raw = json['completedTime'] as String?;
-    // 서버 예시: "yyyy-MM-dd HH:mm:ss"
     final dt = raw == null
         ? DateTime.now()
         : DateFormat('yyyy-MM-dd HH:mm:ss').parse(raw);
@@ -23,8 +28,11 @@ class TradeItem {
     final name = json['stockName'] ?? '';
 
     return TradeItem(
+      id: (json['id'] as num).toInt(),
       title: '$name $act ${qty ?? ''}주',
       completedTime: dt,
+      hasJournal: (json['hasJournal'] as bool?) ?? false,
+      journalId: (json['journalId'] as num?)?.toInt(),
     );
   }
 }

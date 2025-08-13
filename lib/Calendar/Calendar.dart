@@ -27,7 +27,7 @@ class _CalendarState extends State<Calendar> {
   DateTime _reportDate = DateTime.now();
 
   late final TradeService _tradeApi;
-  final Map<String, List<Map<String, String>>> _byDate = {};
+  final Map<String, List<Map<String, Object?>>> _byDate = {};
 
   // 연/월/일 리스트
   final List<int> _years = List.generate(10, (i) => DateTime.now().year - i);
@@ -106,6 +106,9 @@ class _CalendarState extends State<Calendar> {
           'title': t.title,
           'start': DateFormat('yyyy-MM-dd HH:mm:ss.SSS').format(t.completedTime),
           'end': DateFormat('yyyy-MM-dd HH:mm:ss.SSS').format(t.completedTime),
+          'tradeId': t.id,
+          'hasJournal': t.hasJournal,   // ← 이게 꼭 들어가야 함
+          'journalId': t.journalId,
         };
         (_byDate[key] ??= []).add(item);
         print("✅ loaded $key");
@@ -118,15 +121,25 @@ class _CalendarState extends State<Calendar> {
   }
 
   bool _hasEvents(DateTime day) => _byDate.containsKey(_key(day));
-
-  List<String> _getEventsForDay(DateTime day) =>
-      _hasEvents(day) ? ['거래 내역'] : [];
-
-  // ── 캘린더 이벤트 헬퍼 ───────────────────────────────────────────────────
+  // 날짜를 'yyyy-MM-dd' 문자열로
   String _key(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
-  // bool _hasEvents(DateTime day) => _byDate.containsKey(_key(day));
-  // List<String> _getEventsForDay(DateTime day) =>
-  //     _hasEvents(day) ? const ['거래 내역'] : const [];
+
+
+// 이벤트 로더: 매매=trade, 저널=journal
+  List<String> _getEventsForDay(DateTime day) {
+    final key = _key(day);
+    final list = _byDate[key];
+    if (list == null || list.isEmpty) return const [];
+
+    final hasTrade = true; // _byDate에 기록이 있으면 매매 있음
+    final hasJournal = list.any((e) => (e['hasJournal'] as bool?) == true);
+
+    final events = <String>[];
+    if (hasTrade) events.add('trade');       // 노란 점
+    if (hasJournal) events.add('journal');   // 검정 점
+    return events;
+  }
+
 
   // ── build ────────────────────────────────────────────────────────────────
   @override
@@ -202,16 +215,24 @@ class _CalendarState extends State<Calendar> {
                   selectedDayPredicate: (_) => false,
                   onDaySelected: (sel, foc) {
                     setState(() => _focusedDay = foc);
-                    final toShow =
-                        _byDate[_key(sel)] ?? <Map<String, String>>[];
+
+                    final raw = _byDate[_key(sel)] ?? <Map<String, Object?>>[];
+                    final toShow = raw.map((e) => {
+                      'title': (e['title'] ?? '') as String,
+                      'start': (e['start'] ?? '') as String,
+                      'end'  : (e['end']   ?? '') as String,
+                      'tradeId': e['tradeId'].toString(),
+                    }).toList();
+
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) =>
-                            DayDetailPage(date: sel, schedules: toShow),
+                        builder: (_) => DayDetailPage(date: sel, schedules: toShow),
                       ),
                     );
                   },
+
+
 
                   // 월 넘길 때 서버 재호출
                   onPageChanged: (foc) {
@@ -223,25 +244,36 @@ class _CalendarState extends State<Calendar> {
                   calendarBuilders: CalendarBuilders(
                     markerBuilder: (context, day, events) {
                       if (events.isEmpty) return const SizedBox.shrink();
+
+                      final hasTrade = events.contains('trade');
+                      final hasJournal = events.contains('journal');
+
                       return Align(
                         alignment: Alignment.bottomCenter,
                         child: Padding(
                           padding: const EdgeInsets.only(bottom: 6),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
-                            children: List.generate(
-                              events.length.clamp(1, 3),
-                                  (_) => Container(
-                                width: 6,
-                                height: 6,
-                                margin: const EdgeInsets.symmetric(
-                                    horizontal: 1.5),
-                                decoration: const BoxDecoration(
-                                  color: MainColors.sheet3mVt10891,
-                                  shape: BoxShape.circle,
+                            children: [
+                              if (hasTrade)
+                                Container(
+                                  width: 6, height: 6,
+                                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                                  decoration: const BoxDecoration(
+                                    color: MainColors.sheet3mVt10891, // 노란색(매매)
+                                    shape: BoxShape.circle,
+                                  ),
                                 ),
-                              ),
-                            ),
+                              if (hasJournal)
+                                Container(
+                                  width: 6, height: 6,
+                                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.black87, // 검정색(저널)
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                       );
