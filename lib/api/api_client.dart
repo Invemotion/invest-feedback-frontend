@@ -17,7 +17,7 @@ class ApiClient {
     headers: {
       HttpHeaders.acceptHeader: 'application/json',
       // 서버 요구 헤더
-      'X-User-Id': '2',
+      'X-User-id': '2',
       // GET에는 Content-Type가 굳이 필요 없어서 넣지 않음(일부 서버에서 거부하는 경우가 있어 생략)
     },
   )) {
