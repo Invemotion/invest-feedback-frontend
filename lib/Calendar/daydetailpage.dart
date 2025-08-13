@@ -1,7 +1,7 @@
 // lib/Calendar/daydetailpage.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:dio/dio.dart'; // ← 추가
+import 'package:dio/dio.dart';
 import '../../Tools/Appbar/MyAppBar.dart';
 import '../../Tools/Color/Colors.dart';
 import 'package:flutter/services.dart';
@@ -23,7 +23,6 @@ class DayDetailPage extends StatefulWidget {
 class _DayDetailPageState extends State<DayDetailPage> {
   late final List<TextEditingController> _controllers;
 
-  // 감정/행동 한글 라벨
   final List<String> _emotions = [
     '기대', '확신', '불안', '기쁨', '후회', '무감정', '아쉬움'
   ];
@@ -33,7 +32,6 @@ class _DayDetailPageState extends State<DayDetailPage> {
     '손절지연', '시장 추종', '불안정 매도'
   ];
 
-  // 백엔드 ENUM → 한글 라벨 매핑
   final Map<String, String> emotionMap = {
     "EXPECTATION": "기대",
     "CERTAINTY": "확신",
@@ -55,12 +53,23 @@ class _DayDetailPageState extends State<DayDetailPage> {
     "UNSTABLE_SELL": "불안정 매도",
   };
 
+  final Map<String, String> reverseEmotionMap = {};
+  final Map<String, String> reverseBehaviorMap = {};
+
   late final List<List<bool>> _emotionsSelected;
   late final List<List<bool>> _actionsSelected;
 
   @override
   void initState() {
     super.initState();
+
+    reverseEmotionMap.addEntries(
+      emotionMap.entries.map((e) => MapEntry(e.value, e.key)),
+    );
+    reverseBehaviorMap.addEntries(
+      behaviorMap.entries.map((e) => MapEntry(e.value, e.key)),
+    );
+
     _controllers =
         List.generate(widget.schedules.length, (_) => TextEditingController());
 
@@ -93,7 +102,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
         _setSelectedFromEnum(i, data['emotion'], data['behavior']);
       }
     }
-    setState(() {}); // UI 반영
+    setState(() {});
   }
 
   void _setSelectedFromEnum(int i, String? emotion, String? behavior) {
@@ -106,6 +115,56 @@ class _DayDetailPageState extends State<DayDetailPage> {
       final label = behaviorMap[behavior]!;
       final idx = _actions.indexOf(label);
       if (idx != -1) _actionsSelected[i][idx] = true;
+    }
+  }
+
+  Future<void> _saveJournal(int i) async {
+    final dioClient = Dio();
+    final tradeId = widget.schedules[i]['tradeId'];
+    if (tradeId == null) return;
+
+    final emotionIdx = _emotionsSelected[i].indexWhere((e) => e);
+    final behaviorIdx = _actionsSelected[i].indexWhere((e) => e);
+
+    final emotionEnum = (emotionIdx != -1)
+        ? reverseEmotionMap[_emotions[emotionIdx]]
+        : null;
+    final behaviorEnum = (behaviorIdx != -1)
+        ? reverseBehaviorMap[_actions[behaviorIdx]]
+        : null;
+
+    final body = {
+      "reason": _controllers[i].text,
+      "emotion": emotionEnum,
+      "behavior": behaviorEnum,
+    };
+
+    try {
+      await dioClient.put(
+        'http://13.124.208.84:8080/api/journals/$tradeId',
+        data: body,
+        options: Options(headers: {'X-User-id': '2'}),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('매매일지가 성공적으로 수정되었습니다.'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      await _loadJournals();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('매매일지 수정에 실패했습니다.'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 2),
+        ),
+      );
     }
   }
 
@@ -178,14 +237,9 @@ class _DayDetailPageState extends State<DayDetailPage> {
           ),
         ),
         children: [
-          ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.6,
-            ),
-            child: SingleChildScrollView(
-              padding: EdgeInsets.zero,
-              child: _buildWriteJournal(i), // 작성 UI 유지, 불러온 값 반영됨
-            ),
+          SingleChildScrollView(
+            padding: EdgeInsets.zero,
+            child: _buildWriteJournal(i),
           ),
         ],
       ),
@@ -193,47 +247,58 @@ class _DayDetailPageState extends State<DayDetailPage> {
   }
 
   Widget _buildWriteJournal(int i) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.only(left: 8, bottom: 0, top: 8),
-          child: Text(
-            '매매일지',
-            style: TextStyle(
-              fontFamily: 'KBFGText',
-              fontWeight: FontWeight.w700,
-              fontSize: 14,
-              color: MainColors.kbDarkGray,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(left: 8, bottom: 0, top: 8),
+            child: Text(
+              '매매일지',
+              style: TextStyle(
+                fontFamily: 'KBFGText',
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+                color: MainColors.kbDarkGray,
+              ),
             ),
           ),
-        ),
-        _buildDiaryField(i),
-        _buildChipSection(
-          title: '감정',
-          items: _emotions,
-          selected: _emotionsSelected[i],
-          chipPadding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-          labelPadding: const EdgeInsets.symmetric(horizontal: 8),
-          chipSpacing: 3,
-          chipRunSpacing: 2,
-          onTap: (chipIdx, sel) =>
-              setState(() => _emotionsSelected[i][chipIdx] = sel),
-        ),
-        const SizedBox(height: 12),
-        _buildChipSection(
-          title: '행동',
-          items: _actions,
-          selected: _actionsSelected[i],
-          chipPadding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-          labelPadding: const EdgeInsets.symmetric(horizontal: 7),
-          onTap: (chipIdx, sel) =>
-              setState(() => _actionsSelected[i][chipIdx] = sel),
-        ),
-        const SizedBox(height: 16),
-        _buildDoneButton(),
-        const Divider(),
-      ],
+          _buildDiaryField(i),
+          _buildChipSection(
+            title: '감정',
+            items: _emotions,
+            selected: _emotionsSelected[i],
+            singleSelect: true,
+            onTap: (chipIdx, sel) {
+              setState(() {
+                for (int j = 0; j < _emotionsSelected[i].length; j++) {
+                  _emotionsSelected[i][j] = false;
+                }
+                _emotionsSelected[i][chipIdx] = sel;
+              });
+            },
+          ),
+          const SizedBox(height: 12),
+          _buildChipSection(
+            title: '행동',
+            items: _actions,
+            selected: _actionsSelected[i],
+            singleSelect: true,
+            onTap: (chipIdx, sel) {
+              setState(() {
+                for (int j = 0; j < _actionsSelected[i].length; j++) {
+                  _actionsSelected[i][j] = false;
+                }
+                _actionsSelected[i][chipIdx] = sel;
+              });
+            },
+          ),
+          const SizedBox(height: 16),
+          _buildDoneButton(i),
+          const Divider(),
+        ],
+      ),
     );
   }
 
@@ -282,11 +347,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
     required List<String> items,
     required List<bool> selected,
     required void Function(int chipIdx, bool sel) onTap,
-    EdgeInsets chipPadding =
-    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-    EdgeInsets labelPadding = const EdgeInsets.only(left: 6, right: 4),
-    double chipSpacing = 5,
-    double chipRunSpacing = 3,
+    bool singleSelect = false,
   }) =>
       Padding(
         padding: const EdgeInsets.only(left: 8),
@@ -304,8 +365,8 @@ class _DayDetailPageState extends State<DayDetailPage> {
             ),
             const SizedBox(height: 4),
             Wrap(
-              spacing: chipSpacing,
-              runSpacing: chipRunSpacing,
+              spacing: 3,
+              runSpacing: 2,
               children: List.generate(items.length, (idx) {
                 return FilterChip(
                   label: Text(
@@ -316,8 +377,10 @@ class _DayDetailPageState extends State<DayDetailPage> {
                       fontWeight: FontWeight.w400,
                     ),
                   ),
-                  labelPadding: labelPadding,
-                  padding: chipPadding,
+                  labelPadding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
                   selected: selected[idx],
                   showCheckmark: false,
                   backgroundColor: Colors.grey.shade200,
@@ -335,7 +398,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
         ),
       );
 
-  Widget _buildDoneButton() => Center(
+  Widget _buildDoneButton(int i) => Center(
     child: ElevatedButton(
       style: ElevatedButton.styleFrom(
         backgroundColor: MainColors.sheet3mVt10891,
@@ -354,9 +417,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
           fontSize: 13,
         ),
       ),
-      onPressed: () {
-        setState(() {});
-      },
+      onPressed: () => _saveJournal(i),
       child: const Text('완료'),
     ),
   );
