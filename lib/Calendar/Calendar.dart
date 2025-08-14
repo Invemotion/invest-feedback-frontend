@@ -1,7 +1,689 @@
-// lib/Calendar/Calendar.dart
+// // lib/Calendar/Calendar.dart
+// import 'package:flutter/cupertino.dart';
+// import 'package:flutter/material.dart';
+// import 'package:intl/intl.dart';
+// import 'package:table_calendar/table_calendar.dart';
+// import 'package:dio/dio.dart';
+//
+// import '../../Tools/Appbar/MyAppBar.dart';
+// import '../../Tools/Color/Colors.dart';
+// import 'daydetailpage.dart';
+//
+// import '../../api/api_client.dart';
+// import '../../api/trade_service.dart';
+// import '../../common/report_type.dart';
+//
+// class Calendar extends StatefulWidget {
+//   const Calendar({Key? key}) : super(key: key);
+//
+//   @override
+//   State<Calendar> createState() => _CalendarState();
+// }
+//
+// class _CalendarState extends State<Calendar> {
+//   // 캘린더 상태
+//   DateTime _focusedDay = DateTime.now();
+//
+//   // 리포트 상태
+//   ReportType _reportType = ReportType.day;
+//   DateTime _reportDate = DateTime.now();
+//
+//   // API
+//   late final TradeService _tradeApi;
+//   final Dio _http = ApiClient().client;
+//   final int _userId = 1;
+//
+//   // 날짜별 이벤트(매매/저널)
+//   final Map<String, List<Map<String, Object?>>> _byDate = {};
+//
+//   // 리포트 뷰어
+//   bool _loadingReport = false;
+//   String? _reportContent;
+//
+//   @override
+//   void initState() {
+//     super.initState();
+//     _tradeApi = TradeService();
+//     _loadMonth(_focusedDay);
+//     _loadReportForSelection();
+//   }
+//
+//   // ── 유틸 ──────────────────────────────────────────────────────────────────
+//   String _key(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
+//
+//   int _daysInMonth(int year, int month) {
+//     final first = DateTime(year, month, 1);
+//     final nextFirst = DateTime(year, month + 1, 1);
+//     return nextFirst.subtract(const Duration(days: 1)).day;
+//   }
+//
+//   String _reportTypeLabel(ReportType t) {
+//     switch (t) {
+//       case ReportType.day:
+//         return '일별 리포트';
+//       case ReportType.month:
+//         return '월별 리포트';
+//       case ReportType.year:
+//         return '연간 리포트';
+//     }
+//   }
+//
+//   void _setReportType(ReportType t) {
+//     setState(() {
+//       _reportType = t;
+//       if (_reportType == ReportType.year) {
+//         _reportDate = DateTime(_reportDate.year, 1, 1);
+//       } else if (_reportType == ReportType.month) {
+//         _reportDate = DateTime(_reportDate.year, _reportDate.month, 1);
+//       } else {
+//         final lastDay = _daysInMonth(_reportDate.year, _reportDate.month);
+//         final safeDay = (_reportDate.day <= lastDay) ? _reportDate.day : lastDay;
+//         _reportDate = DateTime(_reportDate.year, _reportDate.month, safeDay);
+//       }
+//     });
+//     _loadReportForSelection();
+//   }
+//
+//   // 월 데이터 로드(매매/저널 점)
+//   Future<void> _loadMonth(DateTime focus) async {
+//     final month = DateFormat('yyyy-MM').format(focus);
+//     int page = 0;
+//     const size = 20;
+//
+//     _byDate.clear();
+//
+//     while (true) {
+//       final result =
+//       await _tradeApi.fetchTrades(month: month, page: page, size: size);
+//
+//       for (final t in result.items) {
+//         final key = DateFormat('yyyy-MM-dd').format(t.completedTime);
+//         final item = {
+//           'title': t.title,
+//           'start':
+//           DateFormat('yyyy-MM-dd HH:mm:ss.SSS').format(t.completedTime),
+//           'end': DateFormat('yyyy-MM-dd HH:mm:ss.SSS').format(t.completedTime),
+//           'tradeId': t.id,
+//           'hasJournal': t.hasJournal,
+//           'journalId': t.journalId,
+//         };
+//         (_byDate[key] ??= []).add(item);
+//       }
+//
+//       if (page + 1 >= result.totalPages || result.items.isEmpty) break;
+//       page++;
+//     }
+//
+//     if (mounted) setState(() {});
+//   }
+//
+//   // 선택 시점 리포트 로드(현재는 일별만)
+//   Future<void> _loadReportForSelection() async {
+//     setState(() {
+//       _loadingReport = true;
+//       _reportContent = null;
+//     });
+//
+//     try {
+//       final month = DateFormat('yyyy-MM').format(_reportDate);
+//       final resp = await _http.get(
+//         '/api/reports',
+//         queryParameters: {'month': month, 'page': 0, 'size': 50},
+//         options: Options(headers: {'X-User-id': _userId}),
+//       );
+//
+//       final list =
+//           (resp.data?['data']?['reports']?['content'] as List?) ?? const [];
+//
+//       String? content;
+//       if (_reportType == ReportType.day) {
+//         final dStr = DateFormat('yyyy-MM-dd').format(_reportDate);
+//         for (final m in list) {
+//           if (m is Map && m['reportDate'] == dStr) {
+//             content = (m['content'] ?? '') as String;
+//             break;
+//           }
+//         }
+//       } else {
+//         content = null; // 월/연은 추후 확장
+//       }
+//
+//       if (mounted) setState(() => _reportContent = content);
+//     } catch (e) {
+//       debugPrint('GET /api/reports error: $e');
+//       if (mounted) setState(() => _reportContent = null);
+//     } finally {
+//       if (mounted) setState(() => _loadingReport = false);
+//     }
+//   }
+//
+//   // 캘린더 이벤트 로더(점)
+//   List<String> _getEventsForDay(DateTime day) {
+//     final key = _key(day);
+//     final list = _byDate[key];
+//     if (list == null || list.isEmpty) return const [];
+//     final hasTrade = true;
+//     final hasJournal = list.any((e) => (e['hasJournal'] as bool?) == true);
+//     final events = <String>[];
+//     if (hasTrade) events.add('trade');
+//     if (hasJournal) events.add('journal');
+//     return events;
+//   }
+//
+//   String _reportTypeKo() {
+//     switch (_reportType) {
+//       case ReportType.day:
+//         return '일별';
+//       case ReportType.month:
+//         return '월별';
+//       case ReportType.year:
+//         return '연간';
+//     }
+//   }
+//
+//   // 날짜 라벨
+//   String _dateLabel() {
+//     switch (_reportType) {
+//       case ReportType.day:
+//         return DateFormat('yyyy년 M월 d일').format(_reportDate);
+//       case ReportType.month:
+//         return DateFormat('yyyy년 M월').format(_reportDate);
+//       case ReportType.year:
+//         return DateFormat('yyyy년').format(_reportDate);
+//     }
+//   }
+//
+//   // 날짜 휠(한국어, 검정 텍스트)
+//   Future<void> _openDateWheelPicker() async {
+//     DateTime temp = _reportDate;
+//
+//     await showCupertinoModalPopup(
+//       context: context,
+//       builder: (_) {
+//         return Localizations.override(
+//           context: context,
+//           locale: const Locale('ko', 'KR'),
+//           child: Material(
+//             color: Colors.black54,
+//             child: Align(
+//               alignment: Alignment.bottomCenter,
+//               child: Container(
+//                 height: 320,
+//                 decoration: const BoxDecoration(
+//                   color: Colors.white,
+//                   borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+//                 ),
+//                 child: Column(
+//                   children: [
+//                     SizedBox(
+//                       height: 48,
+//                       child: Row(
+//                         children: [
+//                           CupertinoButton(
+//                             padding:
+//                             const EdgeInsets.symmetric(horizontal: 16),
+//                             child: const Text('취소',
+//                                 style: TextStyle(color: Colors.black87)),
+//                             onPressed: () => Navigator.pop(context),
+//                           ),
+//                           const Spacer(),
+//                           CupertinoButton(
+//                             padding:
+//                             const EdgeInsets.symmetric(horizontal: 16),
+//                             child: const Text('완료',
+//                                 style: TextStyle(
+//                                     color: Colors.black87,
+//                                     fontWeight: FontWeight.bold)),
+//                             onPressed: () {
+//                               setState(() {
+//                                 if (_reportType == ReportType.year) {
+//                                   _reportDate = DateTime(temp.year, 1, 1);
+//                                 } else if (_reportType == ReportType.month) {
+//                                   _reportDate =
+//                                       DateTime(temp.year, temp.month, 1);
+//                                 } else {
+//                                   _reportDate =
+//                                       DateTime(temp.year, temp.month, temp.day);
+//                                 }
+//                               });
+//                               _loadReportForSelection();
+//                               Navigator.pop(context);
+//                             },
+//                           ),
+//                         ],
+//                       ),
+//                     ),
+//                     const Divider(height: 1),
+//                     Expanded(
+//                       child: CupertinoTheme(
+//                         data: const CupertinoThemeData(
+//                           primaryColor: Colors.black87,
+//                           textTheme: CupertinoTextThemeData(
+//                             dateTimePickerTextStyle: TextStyle(
+//                               color: Colors.black87,
+//                               fontSize: 20,
+//                             ),
+//                           ),
+//                         ),
+//                         child: CupertinoDatePicker(
+//                           mode: CupertinoDatePickerMode.date,
+//                           initialDateTime: _reportDate,
+//                           minimumYear: 2020,
+//                           maximumYear: 2030,
+//                           onDateTimeChanged: (d) => temp = d,
+//                           use24hFormat: true,
+//                         ),
+//                       ),
+//                     ),
+//                   ],
+//                 ),
+//               ),
+//             ),
+//           ),
+//         );
+//       },
+//     );
+//   }
+//
+//   // 공통 pill(날짜 버튼)
+//   Widget _centerPill({
+//     required String text,
+//     required VoidCallback onTap,
+//     double height = 48,
+//   }) {
+//     return SizedBox(
+//       height: height,
+//       child: InkWell(
+//         borderRadius: BorderRadius.circular(16),
+//         onTap: onTap,
+//         child: Container(
+//           decoration: BoxDecoration(
+//             color: Colors.white,
+//             borderRadius: BorderRadius.circular(16),
+//             boxShadow: const [
+//               BoxShadow(
+//                 color: Colors.black12,
+//                 blurRadius: 10,
+//                 spreadRadius: -4,
+//               )
+//             ],
+//           ),
+//           padding: const EdgeInsets.symmetric(horizontal: 16),
+//           child: Row(
+//             mainAxisAlignment: MainAxisAlignment.center,
+//             children: const [
+//               Flexible(
+//                 child: Text(
+//                   '',
+//                   overflow: TextOverflow.ellipsis,
+//                 ),
+//               ),
+//             ],
+//           ),
+//         ),
+//       ),
+//     );
+//   }
+//
+//   // 리포트 드롭다운 pill (가로 조금 줄임)
+//   Widget _typeDropdownPill({double width = 140, double height = 48}) {
+//     return SizedBox(
+//       width: width,
+//       height: height,
+//       child: Container(
+//         decoration: BoxDecoration(
+//           color: Colors.white,
+//           borderRadius: BorderRadius.circular(16),
+//           boxShadow: const [
+//             BoxShadow(color: Colors.black12, blurRadius: 10, spreadRadius: -4),
+//           ],
+//         ),
+//         padding: const EdgeInsets.symmetric(horizontal: 14),
+//         child: DropdownButtonHideUnderline(
+//           child: DropdownButton<ReportType>(
+//             dropdownColor: Colors.white,
+//             value: _reportType,
+//             isDense: true,
+//             isExpanded: true,
+//             borderRadius: BorderRadius.circular(30),
+//             icon: const Icon(Icons.expand_more, size: 18, color: MainColors.kbDarkGray),
+//             style: const TextStyle(fontFamily: 'KBFGText', fontSize: 15, color: MainColors.kbDarkGray),
+//             items: const [
+//               DropdownMenuItem(
+//                 value: ReportType.day,
+//                 child: Center(child: Text('일별 리포트')),
+//               ),
+//               DropdownMenuItem(
+//                 value: ReportType.month,
+//                 child: Center(child: Text('월별 리포트')),
+//               ),
+//               DropdownMenuItem(
+//                 value: ReportType.year,
+//                 child: Center(child: Text('연간 리포트')),
+//               ),
+//             ],
+//             onChanged: (t) => _setReportType(t!),
+//           ),
+//         ),
+//       ),
+//     );
+//   }
+//
+//   // ── build ────────────────────────────────────────────────────────────────
+//   @override
+//   Widget build(BuildContext context) {
+//     final mediaW = MediaQuery.of(context).size.width;
+//
+//     return Scaffold(
+//       appBar: MyAppBar(appBar: AppBar(), title: '주식 일지'),
+//       body: SingleChildScrollView(
+//         physics: const AlwaysScrollableScrollPhysics(),
+//         child: SafeArea(
+//           child: Column(
+//             children: [
+//               // ── 캘린더 ──
+//               Container(
+//                 margin:
+//                 const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+//                 padding: const EdgeInsets.all(10),
+//                 decoration: BoxDecoration(
+//                   color: Colors.white,
+//                   borderRadius: BorderRadius.circular(30),
+//                   boxShadow: const [
+//                     BoxShadow(
+//                         color: Colors.grey, blurRadius: 8, spreadRadius: -4),
+//                   ],
+//                 ),
+//                 child: TableCalendar(
+//                   firstDay: DateTime.utc(2020, 1, 1),
+//                   lastDay: DateTime.utc(2029, 12, 31),
+//                   focusedDay: _focusedDay,
+//                   calendarFormat: CalendarFormat.month,
+//                   availableGestures: AvailableGestures.all,
+//                   rowHeight: 60,
+//                   daysOfWeekHeight: 60,
+//                   calendarStyle: const CalendarStyle(
+//                     todayDecoration: BoxDecoration(
+//                       color: MainColors.sheet3mVt10891,
+//                       shape: BoxShape.circle,
+//                     ),
+//                     markersAlignment: Alignment.bottomCenter,
+//                   ),
+//                   headerStyle: const HeaderStyle(
+//                     formatButtonVisible: false,
+//                     titleCentered: true,
+//                     titleTextStyle: TextStyle(
+//                       fontFamily: 'KBFGText',
+//                       fontWeight: FontWeight.w700,
+//                       fontSize: 18,
+//                       color: MainColors.kbDarkGray,
+//                     ),
+//                     leftChevronIcon:
+//                     Icon(Icons.chevron_left, color: MainColors.kbDarkGray),
+//                     rightChevronIcon:
+//                     Icon(Icons.chevron_right, color: MainColors.kbDarkGray),
+//                   ),
+//                   daysOfWeekStyle: const DaysOfWeekStyle(
+//                     weekdayStyle: TextStyle(
+//                       fontFamily: 'KBFGText',
+//                       fontWeight: FontWeight.w600,
+//                       fontSize: 14,
+//                       color: MainColors.kbDarkGray,
+//                     ),
+//                     weekendStyle: TextStyle(
+//                       fontFamily: 'KBFGText',
+//                       fontWeight: FontWeight.w500,
+//                       fontSize: 14,
+//                       color: MainColors.kbSilver,
+//                     ),
+//                   ),
+//                   eventLoader: _getEventsForDay,
+//                   selectedDayPredicate: (_) => false,
+//                   onDaySelected: (sel, foc) {
+//                     setState(() => _focusedDay = foc);
+//
+//                     final raw = _byDate[_key(sel)] ?? <Map<String, Object?>>[];
+//                     final toShow = raw
+//                         .map((e) => {
+//                       'title': (e['title'] ?? '') as String,
+//                       'start': (e['start'] ?? '') as String,
+//                       'end': (e['end'] ?? '') as String,
+//                       'tradeId': e['tradeId'].toString(),
+//                       'hasJournal':
+//                       ((e['hasJournal'] as bool?) == true)
+//                           .toString(),
+//                       'journalId': (e['journalId'] ?? '').toString(),
+//                     })
+//                         .toList();
+//
+//                     Navigator.push(
+//                       context,
+//                       MaterialPageRoute(
+//                         builder: (_) =>
+//                             DayDetailPage(date: sel, schedules: toShow),
+//                       ),
+//                     );
+//                   },
+//                   onPageChanged: (foc) {
+//                     _focusedDay = foc;
+//                     _loadMonth(foc);
+//                   },
+//                   calendarBuilders: CalendarBuilders(
+//                     markerBuilder: (context, day, events) {
+//                       if (events.isEmpty) return const SizedBox.shrink();
+//                       final hasTrade = events.contains('trade');
+//                       final hasJournal = events.contains('journal');
+//                       return Align(
+//                         alignment: Alignment.bottomCenter,
+//                         child: Padding(
+//                           padding: const EdgeInsets.only(bottom: 6),
+//                           child: Row(
+//                             mainAxisSize: MainAxisSize.min,
+//                             children: [
+//                               if (hasTrade)
+//                                 Container(
+//                                   width: 6,
+//                                   height: 6,
+//                                   margin: const EdgeInsets.symmetric(
+//                                       horizontal: 2),
+//                                   decoration: const BoxDecoration(
+//                                     color: MainColors.sheet3mVt10891, // 매매
+//                                     shape: BoxShape.circle,
+//                                   ),
+//                                 ),
+//                               if (hasJournal)
+//                                 Container(
+//                                   width: 6,
+//                                   height: 6,
+//                                   margin: const EdgeInsets.symmetric(
+//                                       horizontal: 2),
+//                                   decoration: const BoxDecoration(
+//                                     color: Colors.black87, // 저널
+//                                     shape: BoxShape.circle,
+//                                   ),
+//                                 ),
+//                             ],
+//                           ),
+//                         ),
+//                       );
+//                     },
+//                   ),
+//                 ),
+//               ),
+//
+//               // ── 리포트 드롭다운(살짝 좁게) + 날짜 pill ──
+//               Padding(
+//                 padding:
+//                 const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+//                 child: LayoutBuilder(
+//                   builder: (context, c) {
+//                     final maxW = c.maxWidth;
+//                     const spacing = 12.0;
+//                     const reportW = 120.0; // ← “일별 리포트” 가로폭 살짝 줄임
+//                     const pillH = 48.0;
+//
+//                     if (maxW >= (reportW + spacing + 180)) {
+//                       // 한 줄 배치
+//                       return Row(
+//                         children: [
+//                           _typeDropdownPill(width: reportW, height: pillH),
+//                           const SizedBox(width: spacing),
+//                           Expanded(
+//                             child: SizedBox(
+//                               height: pillH,
+//                               child: InkWell(
+//                                 borderRadius: BorderRadius.circular(16),
+//                                 onTap: _openDateWheelPicker,
+//                                 child: Container(
+//                                   decoration: BoxDecoration(
+//                                     color: Colors.white,
+//                                     borderRadius: BorderRadius.circular(16),
+//                                     boxShadow: const [
+//                                       BoxShadow(
+//                                         color: Colors.black12,
+//                                         blurRadius: 10,
+//                                         spreadRadius: -4,
+//                                       ),
+//                                     ],
+//                                   ),
+//                                   padding: const EdgeInsets.symmetric(horizontal: 16),
+//                                   child: Row(
+//                                     mainAxisAlignment: MainAxisAlignment.center,
+//                                     children: [
+//                                       Flexible(
+//                                         child: Text(
+//                                           _dateLabel(),
+//                                           overflow: TextOverflow.ellipsis,
+//                                           textAlign: TextAlign.center,
+//                                           style: const TextStyle(
+//                                             fontFamily: 'KBFGText',
+//                                             fontSize: 15,
+//                                             color: MainColors.kbDarkGray,
+//                                           ),
+//                                         ),
+//                                       ),
+//                                       const SizedBox(width: 6),
+//                                       const Icon(Icons.expand_more,
+//                                           size: 18, color: MainColors.kbDarkGray),
+//                                     ],
+//                                   ),
+//                                 ),
+//                               ),
+//                             ),
+//                           ),
+//                         ],
+//                       );
+//                     }
+//                     // 작은 화면: 두 줄 배치
+//                     return Column(
+//                       crossAxisAlignment: CrossAxisAlignment.stretch,
+//                       children: [
+//                         Align(
+//                           alignment: Alignment.centerLeft,
+//                           child: _typeDropdownPill(width: reportW, height: pillH),
+//                         ),
+//                         const SizedBox(height: 8),
+//                         SizedBox(
+//                           height: pillH,
+//                           child: InkWell(
+//                             borderRadius: BorderRadius.circular(16),
+//                             onTap: _openDateWheelPicker,
+//                             child: Container(
+//                               decoration: BoxDecoration(
+//                                 color: Colors.white,
+//                                 borderRadius: BorderRadius.circular(16),
+//                                 boxShadow: const [
+//                                   BoxShadow(
+//                                     color: Colors.black12,
+//                                     blurRadius: 10,
+//                                     spreadRadius: -4,
+//                                   ),
+//                                 ],
+//                               ),
+//                               padding: const EdgeInsets.symmetric(horizontal: 16),
+//                               child: Row(
+//                                 mainAxisAlignment: MainAxisAlignment.center,
+//                                 children: [
+//                                   Flexible(
+//                                     child: Text(
+//                                       _dateLabel(),
+//                                       overflow: TextOverflow.ellipsis,
+//                                       textAlign: TextAlign.center,
+//                                       style: const TextStyle(
+//                                         fontFamily: 'KBFGText',
+//                                         fontSize: 15,
+//                                         color: MainColors.kbDarkGray,
+//                                       ),
+//                                     ),
+//                                   ),
+//                                   const SizedBox(width: 6),
+//                                   const Icon(Icons.expand_more,
+//                                       size: 18, color: MainColors.kbDarkGray),
+//                                 ],
+//                               ),
+//                             ),
+//                           ),
+//                         ),
+//                       ],
+//                     );
+//                   },
+//                 ),
+//               ),
+//
+//               // ── 리포트 내용 카드 ──
+//               AnimatedSize(
+//                 duration: const Duration(milliseconds: 200),
+//                 curve: Curves.easeOut,
+//                 child: Container(
+//                   width: mediaW,
+//                   margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+//                   padding: const EdgeInsets.all(18),
+//                   decoration: BoxDecoration(
+//                     color: Colors.white,
+//                     borderRadius: BorderRadius.circular(30),
+//                     boxShadow: const [
+//                       BoxShadow(color: Colors.grey, blurRadius: 8, spreadRadius: -4),
+//                     ],
+//                   ),
+//                   child: _loadingReport
+//                       ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+//                       : (_reportContent == null || _reportContent!.isEmpty)
+//                       ? Text(
+//                     '# ${DateFormat('yyyy-MM-dd').format(_reportDate)} ${_reportTypeKo()} 리포트',
+//                     textAlign: TextAlign.center,
+//                     style: const TextStyle(
+//                       fontFamily: 'KBFGText',
+//                       fontWeight: FontWeight.w600,
+//                       fontSize: 16,
+//                       color: MainColors.kbDarkGray,
+//                     ),
+//                   )
+//                       : SelectableText(
+//                     _reportContent!,
+//                     textAlign: TextAlign.left,
+//                     style: const TextStyle(
+//                       fontFamily: 'KBFGText',
+//                       fontWeight: FontWeight.w400,
+//                       fontSize: 15,
+//                       height: 1.45,
+//                       color: MainColors.kbDarkGray,
+//                     ),
+//                   ),
+//                 ),
+//               ),
+//             ],
+//           ),
+//         ),
+//       ),
+//     );
+//   }
+// }
+
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:table_calendar/table_calendar.dart';
+import 'package:dio/dio.dart';
 
 import '../../Tools/Appbar/MyAppBar.dart';
 import '../../Tools/Color/Colors.dart';
@@ -9,8 +691,6 @@ import 'daydetailpage.dart';
 
 import '../../api/api_client.dart';
 import '../../api/trade_service.dart';
-import 'package:dio/dio.dart' show DioException; // ← 추가
-
 
 enum ReportType { day, month, year }
 
@@ -22,19 +702,36 @@ class Calendar extends StatefulWidget {
 }
 
 class _CalendarState extends State<Calendar> {
+  // 캘린더
   DateTime _focusedDay = DateTime.now();
+
+  // 리포트
   ReportType _reportType = ReportType.day;
   DateTime _reportDate = DateTime.now();
+  final Dio _http = ApiClient().client;
+  final int _userId = 1; // 리포트 조회/표시에 사용 (일관성)
 
+  // API
   late final TradeService _tradeApi;
+
+  // 날짜별 이벤트(매매/저널)
   final Map<String, List<Map<String, Object?>>> _byDate = {};
 
-  // 연/월/일 리스트
-  final List<int> _years = List.generate(10, (i) => DateTime.now().year - i);
-  final List<int> _months = List.generate(12, (i) => i + 1);
-  final List<int> _days = List.generate(31, (i) => i + 1);
+  // 리포트 뷰
+  bool _loadingReport = false;
+  String? _reportContent;
 
-  // ── 날짜 유틸 ─────────────────────────────────────────────────────────────
+  @override
+  void initState() {
+    super.initState();
+    _tradeApi = TradeService();
+    _loadMonth(_focusedDay);
+    _loadReportForSelection();
+  }
+
+  // ── 유틸 ──────────────────────────────────────────────────────────────────
+  String _key(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
+
   int _daysInMonth(int year, int month) {
     final first = DateTime(year, month, 1);
     final nextFirst = DateTime(year, month + 1, 1);
@@ -54,48 +751,15 @@ class _CalendarState extends State<Calendar> {
         _reportDate = DateTime(_reportDate.year, _reportDate.month, safeDay);
       }
     });
+    _loadReportForSelection();
   }
 
-  void _setReportYear(int year) {
-    setState(() {
-      final month = _reportDate.month;
-      final dayMax = _daysInMonth(year, month);
-      final day = _reportDate.day.clamp(1, dayMax);
-      _reportDate = DateTime(year, month, day);
-    });
-  }
-
-  void _setReportMonth(int month) {
-    setState(() {
-      final year = _reportDate.year;
-      final dayMax = _daysInMonth(year, month);
-      final day = _reportDate.day.clamp(1, dayMax);
-      _reportDate = DateTime(year, month, day);
-    });
-  }
-
-  void _setReportDay(int day) {
-    setState(() {
-      _reportDate = DateTime(_reportDate.year, _reportDate.month, day);
-    });
-  }
-
-  // ── API 연동 ─────────────────────────────────────────────────────────────
-  @override
-  void initState() {
-    super.initState();
-    _tradeApi = TradeService();
-    _loadMonth(_focusedDay);
-  }
-
-
+  // ── 월 데이터(하단 점) ────────────────────────────────────────────────────
   Future<void> _loadMonth(DateTime focus) async {
     final month = DateFormat('yyyy-MM').format(focus);
     int page = 0;
     const size = 20;
-
     _byDate.clear();
-    print("🟡 [_loadMonth] start month=$month");
 
     while (true) {
       final result = await _tradeApi.fetchTrades(month: month, page: page, size: size);
@@ -107,39 +771,232 @@ class _CalendarState extends State<Calendar> {
           'start': DateFormat('yyyy-MM-dd HH:mm:ss.SSS').format(t.completedTime),
           'end': DateFormat('yyyy-MM-dd HH:mm:ss.SSS').format(t.completedTime),
           'tradeId': t.id,
-          'hasJournal': t.hasJournal,   // ← 이게 꼭 들어가야 함
+          'hasJournal': t.hasJournal,
           'journalId': t.journalId,
         };
         (_byDate[key] ??= []).add(item);
-        print("✅ loaded $key");
       }
 
       if (page + 1 >= result.totalPages || result.items.isEmpty) break;
       page++;
     }
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
-  bool _hasEvents(DateTime day) => _byDate.containsKey(_key(day));
-  // 날짜를 'yyyy-MM-dd' 문자열로
-  String _key(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
+  // ── 리포트 텍스트 로드(일별) ───────────────────────────────────────────────
+  Future<void> _loadReportForSelection() async {
+    setState(() {
+      _loadingReport = true;
+      _reportContent = null;
+    });
 
+    try {
+      final month = DateFormat('yyyy-MM').format(_reportDate);
+      final resp = await _http.get(
+        '/api/reports',
+        queryParameters: {'month': month, 'page': 0, 'size': 50},
+        options: Options(headers: {'X-User-id': _userId}),
+      );
 
-// 이벤트 로더: 매매=trade, 저널=journal
+      final list = (resp.data?['data']?['reports']?['content'] as List?) ?? const [];
+      String? content;
+
+      if (_reportType == ReportType.day) {
+        final dStr = DateFormat('yyyy-MM-dd').format(_reportDate);
+        for (final m in list) {
+          if (m is Map && m['reportDate'] == dStr) {
+            content = (m['content'] ?? '') as String;
+            break;
+          }
+        }
+      } else {
+        content = null; // 월/연은 차후
+      }
+
+      if (mounted) setState(() => _reportContent = content);
+    } catch (e) {
+      debugPrint('GET /api/reports error: $e');
+      if (mounted) setState(() => _reportContent = null);
+    } finally {
+      if (mounted) setState(() => _loadingReport = false);
+    }
+  }
+
+  // 캘린더 이벤트 로더(점)
   List<String> _getEventsForDay(DateTime day) {
     final key = _key(day);
     final list = _byDate[key];
     if (list == null || list.isEmpty) return const [];
-
-    final hasTrade = true; // _byDate에 기록이 있으면 매매 있음
+    final hasTrade = true;
     final hasJournal = list.any((e) => (e['hasJournal'] as bool?) == true);
-
     final events = <String>[];
-    if (hasTrade) events.add('trade');       // 노란 점
-    if (hasJournal) events.add('journal');   // 검정 점
+    if (hasTrade) events.add('trade');
+    if (hasJournal) events.add('journal');
     return events;
   }
 
+  String _reportTypeKo() {
+    switch (_reportType) {
+      case ReportType.day:
+        return '일별';
+      case ReportType.month:
+        return '월별';
+      case ReportType.year:
+        return '연간';
+    }
+  }
+
+  // 날짜 라벨
+  String _dateLabel() {
+    switch (_reportType) {
+      case ReportType.day:
+        return DateFormat('yyyy년 M월 d일').format(_reportDate);
+      case ReportType.month:
+        return DateFormat('yyyy년 M월').format(_reportDate);
+      case ReportType.year:
+        return DateFormat('yyyy년').format(_reportDate);
+    }
+  }
+
+  // 날짜 휠(한국어, 검정 텍스트)
+  Future<void> _openDateWheelPicker() async {
+    DateTime temp = _reportDate;
+
+    await showCupertinoModalPopup(
+      context: context,
+      builder: (_) {
+        return Localizations.override(
+          context: context,
+          locale: const Locale('ko', 'KR'),
+          child: Material(
+            color: Colors.black54,
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Container(
+                height: 320,
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                ),
+                child: Column(
+                  children: [
+                    SizedBox(
+                      height: 48,
+                      child: Row(
+                        children: [
+                          CupertinoButton(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: const Text('취소', style: TextStyle(color: Colors.black87)),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                          const Spacer(),
+                          CupertinoButton(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: const Text('완료',
+                                style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+                            onPressed: () {
+                              setState(() {
+                                if (_reportType == ReportType.year) {
+                                  _reportDate = DateTime(temp.year, 1, 1);
+                                } else if (_reportType == ReportType.month) {
+                                  _reportDate = DateTime(temp.year, temp.month, 1);
+                                } else {
+                                  _reportDate = DateTime(temp.year, temp.month, temp.day);
+                                }
+                              });
+                              _loadReportForSelection();
+                              Navigator.pop(context);
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: CupertinoTheme(
+                        data: const CupertinoThemeData(
+                          primaryColor: Colors.black87,
+                          textTheme: CupertinoTextThemeData(
+                            dateTimePickerTextStyle: TextStyle(color: Colors.black87, fontSize: 20),
+                          ),
+                        ),
+                        child: CupertinoDatePicker(
+                          mode: CupertinoDatePickerMode.date,
+                          initialDateTime: _reportDate,
+                          minimumYear: 2020,
+                          maximumYear: 2030,
+                          onDateTimeChanged: (d) => temp = d,
+                          use24hFormat: true,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // 리포트 드롭다운 pill
+  Widget _typeDropdownPill({double width = 140, double height = 48}) {
+    return SizedBox(
+      width: width,
+      height: height,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10, spreadRadius: -4)],
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<ReportType>(
+            value: _reportType,
+            isDense: true,
+            isExpanded: true,
+            alignment: Alignment.center,
+            borderRadius: BorderRadius.circular(16),
+            icon: const Icon(Icons.expand_more, size: 18, color: MainColors.kbDarkGray),
+            style: const TextStyle(fontFamily: 'KBFGText', fontSize: 15, color: MainColors.kbDarkGray),
+            items: const [
+              DropdownMenuItem(value: ReportType.day, child: Center(child: Text('일별 리포트'))),
+              DropdownMenuItem(value: ReportType.month, child: Center(child: Text('월별 리포트'))),
+              DropdownMenuItem(value: ReportType.year, child: Center(child: Text('연간 리포트'))),
+            ],
+            onChanged: (t) => _setReportType(t!),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 날짜 pill (가로 꽉차지 않음)
+  Widget _datePill({double minWidth = 180, double maxWidth = 280, double height = 48}) {
+    return ConstrainedBox(
+      constraints: BoxConstraints(minWidth: minWidth, maxWidth: maxWidth, minHeight: height),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: _openDateWheelPicker,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10, spreadRadius: -4)],
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              // 텍스트는 빌드 시에 주입
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   // ── build ────────────────────────────────────────────────────────────────
   @override
@@ -149,105 +1006,82 @@ class _CalendarState extends State<Calendar> {
     return Scaffold(
       appBar: MyAppBar(appBar: AppBar(), title: '주식 일지'),
       body: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         child: SafeArea(
           child: Column(
             children: [
-              // ── 캘린더 ──
+              // ── 캘린더 카드 ──
               Container(
-                margin:
-                const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(30),
-                  boxShadow: const [
-                    BoxShadow(
-                        color: Colors.grey, blurRadius: 8, spreadRadius: -4),
-                  ],
+                  boxShadow: const [BoxShadow(color: Colors.grey, blurRadius: 8, spreadRadius: -4)],
                 ),
                 child: TableCalendar(
                   firstDay: DateTime.utc(2020, 1, 1),
                   lastDay: DateTime.utc(2029, 12, 31),
                   focusedDay: _focusedDay,
-
+                  calendarFormat: CalendarFormat.month,
+                  availableGestures: AvailableGestures.all,
+                  rowHeight: 60,
+                  daysOfWeekHeight: 60,
                   calendarStyle: const CalendarStyle(
-                    todayDecoration: BoxDecoration(
-                      color: MainColors.sheet3mVt10891,
-                      shape: BoxShape.circle,
-                    ),
+                    todayDecoration: BoxDecoration(color: MainColors.sheet3mVt10891, shape: BoxShape.circle),
                     markersAlignment: Alignment.bottomCenter,
                   ),
                   headerStyle: const HeaderStyle(
                     formatButtonVisible: false,
                     titleCentered: true,
                     titleTextStyle: TextStyle(
-                      fontFamily: 'KBFGText',
-                      fontWeight: FontWeight.w700,
-                      fontSize: 18,
-                      color: MainColors.kbDarkGray,
-                    ),
-                    leftChevronIcon:
-                    Icon(Icons.chevron_left, color: MainColors.kbDarkGray),
-                    rightChevronIcon:
-                    Icon(Icons.chevron_right, color: MainColors.kbDarkGray),
+                        fontFamily: 'KBFGText', fontWeight: FontWeight.w700, fontSize: 18, color: MainColors.kbDarkGray),
+                    leftChevronIcon: Icon(Icons.chevron_left, color: MainColors.kbDarkGray),
+                    rightChevronIcon: Icon(Icons.chevron_right, color: MainColors.kbDarkGray),
                   ),
                   daysOfWeekStyle: const DaysOfWeekStyle(
                     weekdayStyle: TextStyle(
-                      fontFamily: 'KBFGText',
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                      color: MainColors.kbDarkGray,
-                    ),
+                        fontFamily: 'KBFGText', fontWeight: FontWeight.w600, fontSize: 14, color: MainColors.kbDarkGray),
                     weekendStyle: TextStyle(
-                      fontFamily: 'KBFGText',
-                      fontWeight: FontWeight.w500,
-                      fontSize: 14,
-                      color: MainColors.kbSilver,
-                    ),
+                        fontFamily: 'KBFGText', fontWeight: FontWeight.w500, fontSize: 14, color: MainColors.kbSilver),
                   ),
-
-                  calendarFormat: CalendarFormat.month,
-                  availableGestures: AvailableGestures.all,
-                  rowHeight: 60,
-                  daysOfWeekHeight: 60,
-
                   eventLoader: _getEventsForDay,
                   selectedDayPredicate: (_) => false,
-                  onDaySelected: (sel, foc) {
+                  onDaySelected: (sel, foc) async {
                     setState(() => _focusedDay = foc);
 
                     final raw = _byDate[_key(sel)] ?? <Map<String, Object?>>[];
-                    final toShow = raw.map((e) => {
+                    final toShow = raw
+                        .map((e) => {
                       'title': (e['title'] ?? '') as String,
                       'start': (e['start'] ?? '') as String,
-                      'end'  : (e['end']   ?? '') as String,
+                      'end': (e['end'] ?? '') as String,
                       'tradeId': e['tradeId'].toString(),
-                    }).toList();
+                      'hasJournal': ((e['hasJournal'] as bool?) == true).toString(),
+                      'journalId': (e['journalId'] ?? '').toString(),
+                    })
+                        .toList();
 
-                    Navigator.push(
+                    final changed = await Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (_) => DayDetailPage(date: sel, schedules: toShow),
-                      ),
+                      MaterialPageRoute(builder: (_) => DayDetailPage(date: sel, schedules: toShow)),
                     );
+
+                    // 돌아왔을 때 월 데이터/리포트 갱신
+                    if (changed == true) {
+                      await _loadMonth(_focusedDay);
+                      await _loadReportForSelection();
+                    }
                   },
-
-
-
-                  // 월 넘길 때 서버 재호출
                   onPageChanged: (foc) {
                     _focusedDay = foc;
                     _loadMonth(foc);
                   },
-
-                  // 커스텀 마커: 하단 점
                   calendarBuilders: CalendarBuilders(
                     markerBuilder: (context, day, events) {
                       if (events.isEmpty) return const SizedBox.shrink();
-
                       final hasTrade = events.contains('trade');
                       final hasJournal = events.contains('journal');
-
                       return Align(
                         alignment: Alignment.bottomCenter,
                         child: Padding(
@@ -259,19 +1093,13 @@ class _CalendarState extends State<Calendar> {
                                 Container(
                                   width: 6, height: 6,
                                   margin: const EdgeInsets.symmetric(horizontal: 2),
-                                  decoration: const BoxDecoration(
-                                    color: MainColors.sheet3mVt10891, // 노란색(매매)
-                                    shape: BoxShape.circle,
-                                  ),
+                                  decoration: const BoxDecoration(color: MainColors.sheet3mVt10891, shape: BoxShape.circle),
                                 ),
                               if (hasJournal)
                                 Container(
                                   width: 6, height: 6,
                                   margin: const EdgeInsets.symmetric(horizontal: 2),
-                                  decoration: const BoxDecoration(
-                                    color: Colors.black87, // 검정색(저널)
-                                    shape: BoxShape.circle,
-                                  ),
+                                  decoration: const BoxDecoration(color: Colors.black87, shape: BoxShape.circle),
                                 ),
                             ],
                           ),
@@ -282,120 +1110,98 @@ class _CalendarState extends State<Calendar> {
                 ),
               ),
 
-              // ── 리포트 타입 + 날짜 선택(오른쪽 정렬) ──
               Padding(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                 child: Row(
                   children: [
-                    DropdownButton<ReportType>(
-                      value: _reportType,
-                      underline: const SizedBox.shrink(),
-                      items: const [
-                        DropdownMenuItem(
-                          value: ReportType.day,
-                          child: Text('일별 리포트',
-                              style: TextStyle(
-                                  fontFamily: 'KBFGText', fontSize: 15)),
-                        ),
-                        DropdownMenuItem(
-                          value: ReportType.month,
-                          child: Text('월별 리포트',
-                              style: TextStyle(
-                                  fontFamily: 'KBFGText', fontSize: 15)),
-                        ),
-                        DropdownMenuItem(
-                          value: ReportType.year,
-                          child: Text('연간 리포트',
-                              style: TextStyle(
-                                  fontFamily: 'KBFGText', fontSize: 15)),
-                        ),
-                      ],
-                      onChanged: (t) => _setReportType(t!),
-                    ),
+                    _typeDropdownPill(width: 130, height: 48),
 
                     const Spacer(),
 
-                    DropdownButton<int>(
-                      value: _reportDate.year,
-                      underline: const SizedBox.shrink(),
-                      items: _years
-                          .map((y) => DropdownMenuItem(
-                        value: y,
-                        child: Text('$y년',
-                            style: const TextStyle(
-                                fontFamily: 'KBFGText')),
-                      ))
-                          .toList(),
-                      onChanged: (y) => _setReportYear(y!),
-                    ),
-
-                    if (_reportType != ReportType.year) ...[
-                      const SizedBox(width: 6),
-                      DropdownButton<int>(
-                        value: _reportDate.month,
-                        underline: const SizedBox.shrink(),
-                        items: _months
-                            .map((m) => DropdownMenuItem(
-                          value: m,
-                          child: Text('$m월',
-                              style: const TextStyle(
-                                  fontFamily: 'KBFGText')),
-                        ))
-                            .toList(),
-                        onChanged: (m) => _setReportMonth(m!),
-                      ),
-                    ],
-
-                    if (_reportType == ReportType.day) ...[
-                      const SizedBox(width: 6),
-                      DropdownButton<int>(
-                        value: _reportDate.day.clamp(
-                          1,
-                          _daysInMonth(
-                              _reportDate.year, _reportDate.month),
+                    Flexible(
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            // 너무 넓지 않게 상한만 주고, 최소 높이만 고정
+                            maxWidth: 1000,
+                            minHeight: 48,
+                          ),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: _openDateWheelPicker,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Colors.black12,
+                                    blurRadius: 10,
+                                    spreadRadius: -4,
+                                  ),
+                                ],
+                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      _dateLabel(),
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        fontFamily: 'KBFGText',
+                                        fontSize: 15,
+                                        color: MainColors.kbDarkGray,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  const Icon(
+                                    Icons.expand_more,
+                                    size: 18,
+                                    color: MainColors.kbDarkGray,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
-                        underline: const SizedBox.shrink(),
-                        items: List<int>.generate(
-                          _daysInMonth(
-                              _reportDate.year, _reportDate.month),
-                              (i) => i + 1,
-                        )
-                            .map((d) => DropdownMenuItem(
-                          value: d,
-                          child: Text('$d일',
-                              style: const TextStyle(
-                                  fontFamily: 'KBFGText')),
-                        ))
-                            .toList(),
-                        onChanged: (d) => _setReportDay(d!),
                       ),
-                    ],
+                    ),
                   ],
                 ),
               ),
 
-              // ── 리포트 내용 ──
-              Container(
-                width: mediaW,
-                margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                padding: const EdgeInsets.all(15),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(30),
-                  boxShadow: const [
-                    BoxShadow(
-                        color: Colors.grey, blurRadius: 8, spreadRadius: -4),
-                  ],
-                ),
-                child: Text(
-                  '${DateFormat('yyyy-MM-dd').format(_reportDate)}의 ${_reportType.name} 리포트 내용',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontFamily: 'KBFGText',
-                    fontWeight: FontWeight.w400,
-                    fontSize: 15,
-                    color: MainColors.kbDarkGray,
+              // ── 리포트 내용 카드 ──
+              AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOut,
+                child: Container(
+                  width: mediaW,
+                  margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(30),
+                    boxShadow: const [BoxShadow(color: Colors.grey, blurRadius: 8, spreadRadius: -4)],
+                  ),
+                  child: _loadingReport
+                      ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                      : (_reportContent == null || _reportContent!.isEmpty)
+                      ? Text(
+                    '# ${DateFormat('yyyy-MM-dd').format(_reportDate)} ${_reportTypeKo()} 리포트',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontFamily: 'KBFGText', fontWeight: FontWeight.w600, fontSize: 16, color: MainColors.kbDarkGray),
+                  )
+                      : SelectableText(
+                    _reportContent!,
+                    textAlign: TextAlign.left,
+                    style: const TextStyle(
+                        fontFamily: 'KBFGText', fontWeight: FontWeight.w400, fontSize: 15, height: 1.45, color: MainColors.kbDarkGray),
                   ),
                 ),
               ),

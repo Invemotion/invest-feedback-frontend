@@ -1,4 +1,3 @@
-// lib/api/journal_service.dart
 import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
 import 'api_client.dart';
@@ -8,10 +7,10 @@ class Journal {
   final int tradeId;
   final int userId;
   final String reason;
-  final String emotion;   // 예: ANXIETY
-  final String behavior;  // 예: EARLY_SELL
+  final String emotion;   // EXPECTATION, CERTAINTY 등
+  final String behavior;  // EMOTIONAL_ENTRY 등
   final DateTime createdAt;
-  final DateTime updatedAt;
+  final DateTime? updatedAt; // nullable
 
   Journal({
     required this.id,
@@ -25,19 +24,27 @@ class Journal {
   });
 
   factory Journal.fromJson(Map<String, dynamic> json) {
-    // createdAt / updatedAt 예: 2025-08-08T17:40:28.513149
-    DateTime _parse(String s) =>
-        DateFormat("yyyy-MM-ddTHH:mm:ss.SSSSSS").parse(s, true).toLocal();
+    DateTime? _parseNullable(dynamic v) {
+      if (v == null) return null;
+      final s = v.toString().trim();
+      if (s.isEmpty) return null;
+      try { return DateTime.parse(s).toLocal(); } catch (_) {}
+      try { return DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSSSS").parse(s, true).toLocal(); } catch (_) {}
+      try { return DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS").parse(s, true).toLocal(); } catch (_) {}
+      try { return DateFormat("yyyy-MM-dd'T'HH:mm:ss").parse(s, true).toLocal(); } catch (_) {}
+      return null;
+    }
+    DateTime _parseRequired(dynamic v) => _parseNullable(v) ?? DateTime.now();
 
     return Journal(
-      id: json['id'] as int,
-      tradeId: json['tradeId'] as int,
-      userId: json['userId'] as int,
+      id: (json['id'] as num).toInt(),
+      tradeId: (json['tradeId'] as num).toInt(),
+      userId: (json['userId'] as num).toInt(),
       reason: json['reason'] as String? ?? '',
       emotion: json['emotion'] as String? ?? '',
       behavior: json['behavior'] as String? ?? '',
-      createdAt: _parse(json['createdAt'] as String),
-      updatedAt: _parse(json['updatedAt'] as String),
+      createdAt: _parseRequired(json['createdAt']),
+      updatedAt: _parseNullable(json['updatedAt']),
     );
   }
 }
@@ -45,19 +52,53 @@ class Journal {
 class JournalService {
   final ApiClient _api = ApiClient();
 
-  /// tradeId 기준 단건 조회
-  Future<Journal?> getByTradeId(int tradeId) async {
+  /// ✅ 저널 단건 조회: GET /api/journals/{journalId}
+  Future<Journal?> getByJournalId(int journalId) async {
     try {
-      final res = await _api.client.get('/api/journals/$tradeId');
+      final res = await _api.client.get('/api/journals/$journalId');
       final data = res.data?['data'];
-      if (data is Map<String, dynamic>) {
+      if (data is Map<String, dynamic> && data.isNotEmpty) {
         return Journal.fromJson(data);
       }
-      // 데이터 없음 케이스(문서: data.tradeJournals=[]): null 반환
       return null;
-    } on DioException catch (e) {
-      // 400 등 실패 시 null
-      return null;
+    } on DioException catch (_) {
+      return null; // 404 포함 → 미생성/삭제로 간주
     }
+  }
+
+  /// 생성: POST /api/trades/{tradeId}/journal
+  Future<Journal> create({
+    required int tradeId,
+    required String reason,
+    required String? emotion,
+    required String? behavior,
+  }) async {
+    final body = {
+      'reason': reason,
+      'emotion': emotion,
+      'behavior': behavior,
+    };
+    final res = await _api.client.post('/api/trades/$tradeId/journal', data: body);
+    final data = res.data?['data'] as Map<String, dynamic>;
+    return Journal.fromJson(data);
+  }
+
+  /// 수정: PUT /api/journals/{journalId}
+  Future<Journal> update({
+    required int journalId,
+    required String reason,
+    required String? emotion,
+    required String? behavior,
+  }) async {
+    final res = await _api.client.put(
+      '/api/journals/$journalId',
+      data: {
+        'reason': reason,
+        'emotion': emotion,
+        'behavior': behavior,
+      },
+    );
+    final data = res.data?['data'] as Map<String, dynamic>;
+    return Journal.fromJson(data);
   }
 }
