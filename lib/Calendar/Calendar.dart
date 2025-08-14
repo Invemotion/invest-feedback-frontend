@@ -99,6 +99,10 @@ class _CalendarState extends State<Calendar> {
 
       for (final t in result.items) {
         final key = DateFormat('yyyy-MM-dd').format(t.completedTime);
+
+        final num qty = t.quantity ?? 0;
+        final at = (t.actionType ?? '').toUpperCase(); // BUY / SELL
+
         final item = {
           'title': t.title,
           'start': DateFormat('yyyy-MM-dd HH:mm:ss.SSS').format(t.completedTime),
@@ -106,6 +110,8 @@ class _CalendarState extends State<Calendar> {
           'tradeId': t.id,
           'hasJournal': t.hasJournal,
           'journalId': t.journalId,
+          'buyQty'    : (at == 'BUY')  ? qty : 0,
+          'sellQty'   : (at == 'SELL') ? qty : 0,
         };
         (_byDate[key] ??= []).add(item);
       }
@@ -449,6 +455,9 @@ class _CalendarState extends State<Calendar> {
                       // ✅ DayDetailPage가 저널 단건 조회 키로 쓸 값들 — 문자열로 전달
                       'hasJournal': (((e['hasJournal'] ?? false) as bool) == true).toString(),
                       'journalId': (e['journalId'] ?? '').toString(),
+
+                      'buyQty'    : (e['buyQty']  ?? 0).toString(),
+                      'sellQty'   : (e['sellQty'] ?? 0).toString(),
                     }).toList();
 
                     await Navigator.push(

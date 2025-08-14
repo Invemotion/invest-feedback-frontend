@@ -1,9 +1,11 @@
 // lib/Calendar/daydetailpage.dart
+import 'package:dio/dio.dart' show DioException;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+
 import '../../Tools/Appbar/MyAppBar.dart';
 import '../../Tools/Color/Colors.dart';
-import 'package:flutter/services.dart';
 
 import '../../api/journal_service.dart';
 import '../../api/ai_report_facade.dart';
@@ -16,8 +18,9 @@ class DayDetailPage extends StatefulWidget {
   });
 
   final DateTime date;
+
   /// 반드시 포함: title, start, end, tradeId(String)
-  /// 권장 포함: hasJournal, journalId(String)  ← 조회 키에 사용됨
+  /// 권장 포함: hasJournal, journalId(String), buyQty(String), sellQty(String)
   final List<Map<String, String>> schedules;
 
   @override
@@ -25,36 +28,48 @@ class DayDetailPage extends StatefulWidget {
 }
 
 class _DayDetailPageState extends State<DayDetailPage> {
-  late final List<TextEditingController> _controllers;
+  // API
   late final JournalService _journalApi;
   final AiReportFacade _facade = AiReportFacade();
-  final int _userIdForReport = 1; // 리포트 저장 시 일관성 유지(캘린더와 동일)
+  final int _userIdForReport = 1; // (Calendar와 일관성 유지)
 
-  /// 서버 기준 최신 Journal 캐시 (인덱스별)
-  late final List<Journal?> _existing;
+  // UI 상태
+  late final List<TextEditingController> _controllers;
+  late final List<Journal?> _existing; // 서버 최신 Journal 캐시
 
-  // 라벨(한글)
-  final List<String> _emotions = ['기대','확신','불안','기쁨','후회','무감정','아쉬움'];
+  // 감정/행동 라벨(한글)
+  final List<String> _emotions = ['기대', '확신', '불안', '기쁨', '후회', '무감정', '아쉬움'];
   final List<String> _actions = [
-    '추격매수','분할진입','감정적 진입',
-    '전략적 정리','분할매도','조기매도',
-    '손절지연','시장 추종','불안정 매도'
+    '추격매수', '분할진입', '감정적 진입',
+    '전략적 정리', '분할매도', '조기매도',
+    '손절지연', '시장 추종', '불안정 매도',
   ];
 
   // 서버 ENUM ↔ 한글 라벨 매핑
   final Map<String, String> emotionMap = {
-    "EXPECTATION":"기대","CERTAINTY":"확신","ANXIETY":"불안",
-    "JOY":"기쁨","REMORSE":"후회","NEUTRAL":"무감정","REGRET":"아쉬움",
+    "EXPECTATION": "기대",
+    "CERTAINTY": "확신",
+    "ANXIETY": "불안",
+    "JOY": "기쁨",
+    "REMORSE": "후회",
+    "NEUTRAL": "무감정",
+    "REGRET": "아쉬움",
   };
   final Map<String, String> behaviorMap = {
-    "CHASING_BUY":"추격매수","DIVIDED_ENTRY":"분할진입","EMOTIONAL_ENTRY":"감정적 진입",
-    "STRATEGIC_EXIT":"전략적 정리","DIVIDED_SELL":"분할매도","EARLY_SELL":"조기매도",
-    "DELAYED_STOPLOSS":"손절지연","MARKET_FOLLOW":"시장 추종","UNSTABLE_SELL":"불안정 매도",
+    "CHASING_BUY": "추격매수",
+    "DIVIDED_ENTRY": "분할진입",
+    "EMOTIONAL_ENTRY": "감정적 진입",
+    "STRATEGIC_EXIT": "전략적 정리",
+    "DIVIDED_SELL": "분할매도",
+    "EARLY_SELL": "조기매도",
+    "DELAYED_STOPLOSS": "손절지연",
+    "MARKET_FOLLOW": "시장 추종",
+    "UNSTABLE_SELL": "불안정 매도",
   };
-
   final Map<String, String> reverseEmotionMap = {};
   final Map<String, String> reverseBehaviorMap = {};
 
+  // 선택상태(단일선택)
   late final List<List<bool>> _emotionsSelected;
   late final List<List<bool>> _actionsSelected;
 
@@ -65,7 +80,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
     super.initState();
     _journalApi = JournalService();
 
-    // 역매핑 구축
+    // 역매핑
     reverseEmotionMap.addEntries(
       emotionMap.entries.map((e) => MapEntry(e.value, e.key)),
     );
@@ -73,26 +88,16 @@ class _DayDetailPageState extends State<DayDetailPage> {
       behaviorMap.entries.map((e) => MapEntry(e.value, e.key)),
     );
 
-    _controllers = List.generate(
-      widget.schedules.length,
-          (_) => TextEditingController(),
-    );
-    _emotionsSelected = List.generate(
-      widget.schedules.length,
-          (_) => List<bool>.filled(_emotions.length, false),
-    );
-    _actionsSelected = List.generate(
-      widget.schedules.length,
-          (_) => List<bool>.filled(_actions.length, false),
-    );
-    _existing = List.filled(widget.schedules.length, null);
+    final n = widget.schedules.length;
+    _controllers = List.generate(n, (_) => TextEditingController());
+    _existing = List.filled(n, null);
+    _emotionsSelected = List.generate(n, (_) => List<bool>.filled(_emotions.length, false));
+    _actionsSelected = List.generate(n, (_) => List<bool>.filled(_actions.length, false));
 
     _loadJournals();
   }
 
-  /// ✅ 조회는 항상 journalId 로만 한다.
-  /// - journalId가 없으면(빈 문자열/0/null) → 미생성으로 간주
-  /// - 404 응답 → 미작성/삭제로 간주
+  /// 저널 단건 로드(journalId 기준)
   Future<void> _loadJournals() async {
     for (int i = 0; i < widget.schedules.length; i++) {
       final journalIdStr = widget.schedules[i]['journalId']?.trim();
@@ -111,8 +116,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
         _controllers[i].text = j.reason;
         _setSelectedFromEnum(i, j.emotion, j.behavior);
         widget.schedules[i]['hasJournal'] = 'true';
-        // 서버가 새 id로 교체한 경우 최신화
-        widget.schedules[i]['journalId'] = j.id.toString();
+        widget.schedules[i]['journalId'] = j.id.toString(); // 최신화
       } else {
         widget.schedules[i]['hasJournal'] = 'false';
         widget.schedules[i]['journalId'] = '';
@@ -151,7 +155,6 @@ class _DayDetailPageState extends State<DayDetailPage> {
 
     final emotionEnum = (emoIdx != -1) ? reverseEmotionMap[_emotions[emoIdx]] : null;
     final behaviorEnum = (behIdx != -1) ? reverseBehaviorMap[_actions[behIdx]] : null;
-
     final reason = _controllers[i].text.trim();
 
     try {
@@ -183,7 +186,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
         _showSnack('매매일지가 수정되었습니다.', success: true);
       }
 
-      // 최신 상태 재확인
+      // 최신 확인
       final fresh = await _journalApi.getByJournalId(_existing[i]!.id);
       _existing[i] = fresh ?? _existing[i];
       if (fresh != null) {
@@ -192,6 +195,17 @@ class _DayDetailPageState extends State<DayDetailPage> {
       }
 
       if (mounted) setState(() {});
+    } on DioException catch (e) {
+      // 서버가 "변경사항이 없습니다." (status: 40903) 응답 시 정보 안내
+      final data = e.response?.data;
+      final msg = (data is Map && data['message'] is String) ? data['message'] as String : null;
+      final code = (data is Map) ? data['status'] : null;
+
+      if (code == 40903 || (msg ?? '').contains('변경사항이 없습니다')) {
+        _showSnack('변경사항이 없습니다.', success: true);
+        return;
+      }
+      _showSnack('매매일지 저장에 실패했습니다.', success: false);
     } catch (_) {
       _showSnack('매매일지 저장에 실패했습니다.', success: false);
     }
@@ -208,10 +222,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
     if (_creatingReport) return;
     setState(() => _creatingReport = true);
     try {
-      // 1) 일지 먼저 저장
       await _saveAllJournals();
-
-      // 2) LLM 생성 + 서버 저장/갱신
       final r = await _facade.createAndSaveDaily(
         date: widget.date,
         userId: _userIdForReport,
@@ -220,7 +231,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
       if (!mounted) return;
       if (r.ok) {
         _showSnack(r.message, success: true);
-        Navigator.pop(context, true); // Calendar로 true 반환 → 갱신 트리거
+        Navigator.pop(context, true); // Calendar로 true 반환 → 점 상태 갱신
       } else {
         _showSnack('리포트 생성 실패: ${r.message}', success: false);
       }
@@ -271,6 +282,8 @@ class _DayDetailPageState extends State<DayDetailPage> {
     );
   }
 
+  // ───────────────── UI 빌더들 ─────────────────
+
   Widget _buildEmpty() => Center(
     child: Column(
       mainAxisSize: MainAxisSize.min,
@@ -294,6 +307,15 @@ class _DayDetailPageState extends State<DayDetailPage> {
     final s = widget.schedules[i];
     final created = _existing[i] != null;
 
+    final timeText = (s['start'] ?? '').isNotEmpty
+        ? DateFormat('a h:mm', 'ko').format(DateTime.parse(s['start']!))
+        : '';
+
+    // ⬇️ Calendar에서 넘겨준 buyQty/sellQty를 사용해 요약 텍스트 구성
+    final b = int.tryParse((s['buyQty'] ?? '').toString()) ?? 0;
+    final sv = int.tryParse((s['sellQty'] ?? '').toString()) ?? 0;
+    final summary = (b > 0 || sv > 0) ? '매수 ${b}주 · 매도 ${sv}주' : null;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: ExpansionTile(
@@ -307,16 +329,33 @@ class _DayDetailPageState extends State<DayDetailPage> {
             color: MainColors.kbDarkGray,
           ),
         ),
-        subtitle: Text(
-          (s['start'] ?? '').isNotEmpty
-              ? DateFormat('a h:mm', 'ko').format(DateTime.parse(s['start']!))
-              : '',
-          style: TextStyle(
-            fontFamily: 'KBFGText',
-            fontWeight: FontWeight.w400,
-            fontSize: 14,
-            color: MainColors.kbDarkGray,
-          ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (timeText.isNotEmpty)
+              Text(
+                timeText,
+                style: TextStyle(
+                  fontFamily: 'KBFGText',
+                  fontWeight: FontWeight.w400,
+                  fontSize: 14,
+                  color: MainColors.kbDarkGray,
+                ),
+              ),
+            if (summary != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  summary,
+                  style: TextStyle(
+                    fontFamily: 'KBFGText',
+                    fontWeight: FontWeight.w500,
+                    fontSize: 13,
+                    color: MainColors.kbDarkGray,
+                  ),
+                ),
+              ),
+          ],
         ),
         children: [
           SingleChildScrollView(
@@ -353,8 +392,9 @@ class _DayDetailPageState extends State<DayDetailPage> {
               ],
             ),
           ),
-          // 텍스트 필드
+          // 텍스트 입력
           _buildDiaryField(i),
+
           // 감정
           _buildChipSection(
             title: '감정',
@@ -371,6 +411,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
             },
           ),
           const SizedBox(height: 12),
+
           // 행동
           _buildChipSection(
             title: '행동',
@@ -387,6 +428,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
             },
           ),
           const SizedBox(height: 16),
+
           // 저장 버튼
           _buildDoneButton(i),
           const Divider(),
@@ -515,7 +557,9 @@ class _DayDetailPageState extends State<DayDetailPage> {
   );
 
   Widget _buildStatusBadge(bool created) {
-    final bgColor = created ? MainColors.sheet3mVt10891.withOpacity(0.18) : Colors.grey.shade200;
+    final bgColor = created
+        ? MainColors.sheet3mVt10891.withValues(alpha: 0.18) // withOpacity → withValues 대체
+        : Colors.grey.shade200;
     final borderCol = created ? MainColors.sheet3mVt10891 : Colors.grey.shade400;
     final label = created ? '생성됨' : '미작성';
 
@@ -529,7 +573,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
       child: Text(
         label,
         style: const TextStyle(
-          fontFamily: 'KBFGText', // KB 글씨체
+          fontFamily: 'KBFGText',
           fontWeight: FontWeight.w600,
           fontSize: 12,
           color: MainColors.kbDarkGray,
