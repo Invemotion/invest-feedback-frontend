@@ -2,90 +2,119 @@ import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
 import 'api_client.dart';
 
-class TradeItem {
-  final int id;                // trade PK
+class TradeSummary {
+  final int id;
   final String title;
   final DateTime completedTime;
   final bool hasJournal;
   final int? journalId;
+  final String? stockName;
+  final String? stockCode;
+  final String? actionType;
+  final String? orderType;
+  final num? pricePerSell;
+  final num? pricePerBuy;
+  final num? marketPriceAtOrder;
+  final num? totalAmount;
+  final num? quantity;
+  final String? orderTime;
+  final String? resultType;
 
-  TradeItem({
+  TradeSummary({
     required this.id,
     required this.title,
     required this.completedTime,
     required this.hasJournal,
     required this.journalId,
+    this.stockName,
+    this.stockCode,
+    this.actionType,
+    this.orderType,
+    this.pricePerSell,
+    this.pricePerBuy,
+    this.marketPriceAtOrder,
+    this.totalAmount,
+    this.quantity,
+    this.orderTime,
+    this.resultType,
   });
 
-  factory TradeItem.fromJson(Map<String, dynamic> json) {
-    final raw = json['completedTime'] as String?;
-    final dt = raw == null
-        ? DateTime.now()
-        : DateFormat('yyyy-MM-dd HH:mm:ss').parse(raw);
+  factory TradeSummary.fromJson(Map<String, dynamic> json) {
+    DateTime _parseDate(dynamic v) {
+      final s = v?.toString();
+      if (s == null || s.isEmpty) return DateTime.now();
+      for (final fmt in [
+        "yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
+        "yyyy-MM-dd'T'HH:mm:ss.SSS",
+        "yyyy-MM-dd'T'HH:mm:ss",
+        "yyyy-MM-dd HH:mm:ss",
+      ]) {
+        try { return DateFormat(fmt).parseUtc(s).toLocal(); } catch (_) {}
+        try { return DateFormat(fmt).parse(s, true).toLocal(); } catch (_) {}
+      }
+      try { return DateTime.parse(s).toLocal(); } catch (_) {}
+      return DateTime.now();
+    }
 
-    final qty = json['quantity'];
-    final act = json['actionType'] ?? '';
-    final name = json['stockName'] ?? '';
-
-    return TradeItem(
+    return TradeSummary(
       id: (json['id'] as num).toInt(),
-      title: '$name $act ${qty ?? ''}주',
-      completedTime: dt,
-      hasJournal: (json['hasJournal'] as bool?) ?? false,
-      journalId: (json['journalId'] as num?)?.toInt(),
+      title: json['title']?.toString() ?? (json['stockName']?.toString() ?? '거래'),
+      completedTime: _parseDate(json['completedTime'] ?? json['completionTime']),
+      hasJournal: (json['hasJournal'] == true) || (json['journalId'] != null),
+      journalId: (json['journalId'] is num)
+          ? (json['journalId'] as num).toInt()
+          : int.tryParse('${json['journalId'] ?? ''}'),
+      stockName: json['stockName']?.toString(),
+      stockCode: json['stockCode']?.toString(),
+      actionType: json['actionType']?.toString(),
+      orderType: json['orderType']?.toString(),
+      pricePerSell: json['pricePerSell'] as num?,
+      pricePerBuy: json['pricePerBuy'] as num?,
+      marketPriceAtOrder: json['marketPriceAtOrder'] as num?,
+      totalAmount: json['totalAmount'] as num?,
+      quantity: json['quantity'] as num?,
+      orderTime: json['orderTime']?.toString(),
+      resultType: json['resultType']?.toString(),
     );
   }
 }
 
-class TradeResult {
-  final List<TradeItem> items;
+class TradePage {
+  final List<TradeSummary> items;
   final int totalPages;
-  TradeResult({required this.items, required this.totalPages});
+  final bool last;
+
+  TradePage({required this.items, required this.totalPages, required this.last});
 }
 
 class TradeService {
   final ApiClient _api = ApiClient();
 
-  Future<TradeResult> fetchTrades({
-    required String month,
-    required int page,
-    required int size,
+  Future<TradePage> fetchTrades({
+    required String month, // yyyy-MM
+    int page = 0,
+    int size = 20,
   }) async {
-    try {
-      final res = await _api.client.get(
-        '/api/trades',
-        queryParameters: {
-          'month': month, // ex) 2025-08
-          'page': page,   // 0-base
-          'size': size,   // page size
-        },
-      );
+    final res = await _api.client.get(
+      '/api/trades',
+      queryParameters: {
+        'month': month,
+        'page': page,
+        'size': size,
+      },
+    );
 
-      // 성공 응답 스펙: data.trades.content / page / size / totalElements / last
-      final data = res.data;
-      final trades = data['data']?['trades'];
-      final List content = (trades?['content'] as List?) ?? const [];
+    final data = res.data?['data']?['trades'] as Map<String, dynamic>?;
+    final content = (data?['content'] as List?) ?? const [];
+    final totalPages = (data?['totalPages'] as num?)?.toInt()
+        ?? ((data?['last'] == true) ? page + 1 : page + 1);
+    final last = data?['last'] == true;
 
-      final int totalElements = trades?['totalElements'] is int
-          ? trades['totalElements'] as int
-          : int.tryParse('${trades?['totalElements']}') ?? content.length;
-
-      final int pageSize = trades?['size'] is int
-          ? trades['size'] as int
-          : int.tryParse('${trades?['size']}') ?? size;
-
-      final items = content
-          .map((e) => TradeItem.fromJson(e as Map<String, dynamic>))
-          .toList();
-
-      final totalPages = pageSize > 0
-          ? (totalElements + pageSize - 1) ~/ pageSize // 올림 나눗셈
-          : 1;
-
-      return TradeResult(items: items, totalPages: totalPages);
-    } on DioException catch (e) {
-      // 실패 시 UI가 죽지 않도록 빈 결과 반환
-      return TradeResult(items: const [], totalPages: 0);
+    final items = <TradeSummary>[];
+    for (final e in content) {
+      if (e is Map<String, dynamic>) items.add(TradeSummary.fromJson(e));
     }
+
+    return TradePage(items: items, totalPages: totalPages, last: last);
   }
 }

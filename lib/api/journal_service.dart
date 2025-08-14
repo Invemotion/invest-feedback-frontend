@@ -7,8 +7,8 @@ class Journal {
   final int tradeId;
   final int userId;
   final String reason;
-  final String emotion;   // EXPECTATION, CERTAINTY 등
-  final String behavior;  // EMOTIONAL_ENTRY 등
+  final String emotion;   // EXPECTATION, CERTAINTY, ... (예: HEAD/ai_report 설명 결합)
+  final String behavior;  // EMOTIONAL_ENTRY, CHASING_BUY, EARLY_SELL 등
   final DateTime createdAt;
   final DateTime? updatedAt; // nullable
 
@@ -53,6 +53,7 @@ class JournalService {
   final ApiClient _api = ApiClient();
 
   /// ✅ 저널 단건 조회: GET /api/journals/{journalId}
+  /// 404 등 응답 시 → 미작성/삭제로 간주
   Future<Journal?> getByJournalId(int journalId) async {
     try {
       final res = await _api.client.get('/api/journals/$journalId');
@@ -62,7 +63,7 @@ class JournalService {
       }
       return null;
     } on DioException catch (_) {
-      return null; // 404 포함 → 미생성/삭제로 간주
+      return null;
     }
   }
 
@@ -83,7 +84,8 @@ class JournalService {
     return Journal.fromJson(data);
   }
 
-  /// 수정: PUT /api/journals/{tradeId} (서버 스펙 유지)
+  /// 수정: PUT /api/journals/{journalId}
+  /// (서버 스펙 유지 — 일부 구간에서는 tradeId 기반 호출도 사용 가능)
   Future<Journal> update({
     required int journalId,
     required String reason,

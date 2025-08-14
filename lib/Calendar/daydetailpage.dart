@@ -1,3 +1,4 @@
+// lib/Calendar/daydetailpage.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../Tools/Appbar/MyAppBar.dart';
@@ -5,6 +6,7 @@ import '../../Tools/Color/Colors.dart';
 import 'package:flutter/services.dart';
 
 import '../../api/journal_service.dart';
+import '../../api/ai_report_facade.dart';
 
 class DayDetailPage extends StatefulWidget {
   const DayDetailPage({
@@ -25,17 +27,21 @@ class DayDetailPage extends StatefulWidget {
 class _DayDetailPageState extends State<DayDetailPage> {
   late final List<TextEditingController> _controllers;
   late final JournalService _journalApi;
+  final AiReportFacade _facade = AiReportFacade();
+  final int _userIdForReport = 1; // 리포트 저장 시 일관성 유지(캘린더와 동일)
 
   /// 서버 기준 최신 Journal 캐시 (인덱스별)
   late final List<Journal?> _existing;
 
-  final List<String> _emotions = ['기대', '확신', '불안', '기쁨', '후회', '무감정', '아쉬움'];
+  // 라벨(한글)
+  final List<String> _emotions = ['기대','확신','불안','기쁨','후회','무감정','아쉬움'];
   final List<String> _actions = [
     '추격매수','분할진입','감정적 진입',
     '전략적 정리','분할매도','조기매도',
     '손절지연','시장 추종','불안정 매도'
   ];
 
+  // 서버 ENUM ↔ 한글 라벨 매핑
   final Map<String, String> emotionMap = {
     "EXPECTATION":"기대","CERTAINTY":"확신","ANXIETY":"불안",
     "JOY":"기쁨","REMORSE":"후회","NEUTRAL":"무감정","REGRET":"아쉬움",
@@ -52,17 +58,33 @@ class _DayDetailPageState extends State<DayDetailPage> {
   late final List<List<bool>> _emotionsSelected;
   late final List<List<bool>> _actionsSelected;
 
+  bool _creatingReport = false;
+
   @override
   void initState() {
     super.initState();
     _journalApi = JournalService();
 
-    reverseEmotionMap.addEntries(emotionMap.entries.map((e) => MapEntry(e.value, e.key)));
-    reverseBehaviorMap.addEntries(behaviorMap.entries.map((e) => MapEntry(e.value, e.key)));
+    // 역매핑 구축
+    reverseEmotionMap.addEntries(
+      emotionMap.entries.map((e) => MapEntry(e.value, e.key)),
+    );
+    reverseBehaviorMap.addEntries(
+      behaviorMap.entries.map((e) => MapEntry(e.value, e.key)),
+    );
 
-    _controllers = List.generate(widget.schedules.length, (_) => TextEditingController());
-    _emotionsSelected = List.generate(widget.schedules.length, (_) => List<bool>.filled(_emotions.length, false));
-    _actionsSelected  = List.generate(widget.schedules.length, (_) => List<bool>.filled(_actions.length, false));
+    _controllers = List.generate(
+      widget.schedules.length,
+          (_) => TextEditingController(),
+    );
+    _emotionsSelected = List.generate(
+      widget.schedules.length,
+          (_) => List<bool>.filled(_emotions.length, false),
+    );
+    _actionsSelected = List.generate(
+      widget.schedules.length,
+          (_) => List<bool>.filled(_actions.length, false),
+    );
     _existing = List.filled(widget.schedules.length, null);
 
     _loadJournals();
@@ -70,7 +92,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
 
   /// ✅ 조회는 항상 journalId 로만 한다.
   /// - journalId가 없으면(빈 문자열/0/null) → 미생성으로 간주
-  /// - 404 응답 → 미생성/삭제로 간주
+  /// - 404 응답 → 미작성/삭제로 간주
   Future<void> _loadJournals() async {
     for (int i = 0; i < widget.schedules.length; i++) {
       final journalIdStr = widget.schedules[i]['journalId']?.trim();
@@ -89,11 +111,10 @@ class _DayDetailPageState extends State<DayDetailPage> {
         _controllers[i].text = j.reason;
         _setSelectedFromEnum(i, j.emotion, j.behavior);
         widget.schedules[i]['hasJournal'] = 'true';
-        // 만약 서버가 새 id로 교체되었다면(재생성 등), 여기서도 최신화
+        // 서버가 새 id로 교체한 경우 최신화
         widget.schedules[i]['journalId'] = j.id.toString();
       } else {
         widget.schedules[i]['hasJournal'] = 'false';
-        // stale id 정리
         widget.schedules[i]['journalId'] = '';
       }
     }
@@ -118,18 +139,25 @@ class _DayDetailPageState extends State<DayDetailPage> {
     final tradeId = int.tryParse(tradeIdStr ?? '');
     if (tradeId == null) return;
 
-    final emotionIdx = _emotionsSelected[i].indexWhere((e) => e);
-    final behaviorIdx = _actionsSelected[i].indexWhere((e) => e);
+    // 단일선택 강제
+    final emoIdx = _emotionsSelected[i].indexWhere((e) => e);
+    final behIdx = _actionsSelected[i].indexWhere((e) => e);
+    for (int j = 0; j < _emotionsSelected[i].length; j++) {
+      if (j != emoIdx) _emotionsSelected[i][j] = false;
+    }
+    for (int j = 0; j < _actionsSelected[i].length; j++) {
+      if (j != behIdx) _actionsSelected[i][j] = false;
+    }
 
-    final emotionEnum = (emotionIdx != -1) ? reverseEmotionMap[_emotions[emotionIdx]] : null;
-    final behaviorEnum = (behaviorIdx != -1) ? reverseBehaviorMap[_actions[behaviorIdx]] : null;
+    final emotionEnum = (emoIdx != -1) ? reverseEmotionMap[_emotions[emoIdx]] : null;
+    final behaviorEnum = (behIdx != -1) ? reverseBehaviorMap[_actions[behIdx]] : null;
 
     final reason = _controllers[i].text.trim();
 
     try {
       Journal result;
       if (_existing[i] == null) {
-        // 생성: tradeId로 POST
+        // 생성
         result = await _journalApi.create(
           tradeId: tradeId,
           reason: reason,
@@ -137,15 +165,12 @@ class _DayDetailPageState extends State<DayDetailPage> {
           behavior: behaviorEnum,
         );
         _existing[i] = result;
-
-        // 새 journalId 즉시 로컬 반영 (표시/후속 조회용)
         widget.schedules[i]['journalId'] = result.id.toString();
         widget.schedules[i]['hasJournal'] = 'true';
-
         _showSnack('매매일지가 생성되었습니다.', success: true);
       } else {
-        // ✅ 수정: journalId로 PUT
-        final jId = _existing[i]!.id; // 서버에서 방금 조회/생성된 최신 id
+        // 수정
+        final jId = _existing[i]!.id;
         result = await _journalApi.update(
           journalId: jId,
           reason: reason,
@@ -153,18 +178,14 @@ class _DayDetailPageState extends State<DayDetailPage> {
           behavior: behaviorEnum,
         );
         _existing[i] = result;
-
-        // 안전 동기화
         widget.schedules[i]['journalId'] = result.id.toString();
         widget.schedules[i]['hasJournal'] = 'true';
-
         _showSnack('매매일지가 수정되었습니다.', success: true);
       }
 
-      // 저장 직후, 최신 상태 재확인 (stale 방지)
+      // 최신 상태 재확인
       final fresh = await _journalApi.getByJournalId(_existing[i]!.id);
       _existing[i] = fresh ?? _existing[i];
-
       if (fresh != null) {
         widget.schedules[i]['journalId'] = fresh.id.toString();
         widget.schedules[i]['hasJournal'] = 'true';
@@ -173,6 +194,40 @@ class _DayDetailPageState extends State<DayDetailPage> {
       if (mounted) setState(() {});
     } catch (_) {
       _showSnack('매매일지 저장에 실패했습니다.', success: false);
+    }
+  }
+
+  Future<void> _saveAllJournals() async {
+    for (int i = 0; i < widget.schedules.length; i++) {
+      await _saveJournal(i);
+    }
+  }
+
+  /// AI 일일 리포트 생성(저널 저장 후 실행)
+  Future<void> _createDailyReport() async {
+    if (_creatingReport) return;
+    setState(() => _creatingReport = true);
+    try {
+      // 1) 일지 먼저 저장
+      await _saveAllJournals();
+
+      // 2) LLM 생성 + 서버 저장/갱신
+      final r = await _facade.createAndSaveDaily(
+        date: widget.date,
+        userId: _userIdForReport,
+      );
+
+      if (!mounted) return;
+      if (r.ok) {
+        _showSnack(r.message, success: true);
+        Navigator.pop(context, true); // Calendar로 true 반환 → 갱신 트리거
+      } else {
+        _showSnack('리포트 생성 실패: ${r.message}', success: false);
+      }
+    } catch (e) {
+      if (mounted) _showSnack('리포트 생성 오류: $e', success: false);
+    } finally {
+      if (mounted) setState(() => _creatingReport = false);
     }
   }
 
@@ -189,7 +244,9 @@ class _DayDetailPageState extends State<DayDetailPage> {
 
   @override
   void dispose() {
-    for (final c in _controllers) { c.dispose(); }
+    for (final c in _controllers) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -203,8 +260,13 @@ class _DayDetailPageState extends State<DayDetailPage> {
           ? _buildEmpty()
           : ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 10),
-        itemCount: widget.schedules.length,
-        itemBuilder: (context, i) => _buildScheduleTile(i),
+        itemCount: widget.schedules.length + 1, // 맨 아래 AI 버튼 추가
+        itemBuilder: (context, i) {
+          if (i == widget.schedules.length) {
+            return _buildAiReportCta();
+          }
+          return _buildScheduleTile(i);
+        },
       ),
     );
   }
@@ -212,9 +274,9 @@ class _DayDetailPageState extends State<DayDetailPage> {
   Widget _buildEmpty() => Center(
     child: Column(
       mainAxisSize: MainAxisSize.min,
-      children: const [
-        Icon(Icons.find_in_page_outlined, size: 64, color: Colors.black26),
-        SizedBox(height: 16),
+      children: [
+        const Icon(Icons.find_in_page_outlined, size: 64, color: Colors.black26),
+        const SizedBox(height: 16),
         Text(
           '조회 내역이 없습니다.',
           style: TextStyle(
@@ -238,7 +300,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
         tilePadding: EdgeInsets.zero,
         title: Text(
           s['title'] ?? '',
-          style: const TextStyle(
+          style: TextStyle(
             fontFamily: 'KBFGText',
             fontWeight: FontWeight.w500,
             fontSize: 16,
@@ -246,8 +308,10 @@ class _DayDetailPageState extends State<DayDetailPage> {
           ),
         ),
         subtitle: Text(
-          DateFormat('a h:mm', 'ko').format(DateTime.parse(s['start']!)),
-          style: const TextStyle(
+          (s['start'] ?? '').isNotEmpty
+              ? DateFormat('a h:mm', 'ko').format(DateTime.parse(s['start']!))
+              : '',
+          style: TextStyle(
             fontFamily: 'KBFGText',
             fontWeight: FontWeight.w400,
             fontSize: 14,
@@ -270,11 +334,12 @@ class _DayDetailPageState extends State<DayDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 헤더 + 상태 뱃지
           Padding(
             padding: const EdgeInsets.only(left: 8, bottom: 0, top: 8),
             child: Row(
               children: [
-                const Text(
+                Text(
                   '매매일지',
                   style: TextStyle(
                     fontFamily: 'KBFGText',
@@ -288,7 +353,9 @@ class _DayDetailPageState extends State<DayDetailPage> {
               ],
             ),
           ),
+          // 텍스트 필드
           _buildDiaryField(i),
+          // 감정
           _buildChipSection(
             title: '감정',
             items: _emotions,
@@ -304,6 +371,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
             },
           ),
           const SizedBox(height: 12),
+          // 행동
           _buildChipSection(
             title: '행동',
             items: _actions,
@@ -319,6 +387,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
             },
           ),
           const SizedBox(height: 16),
+          // 저장 버튼
           _buildDoneButton(i),
           const Divider(),
         ],
@@ -369,49 +438,58 @@ class _DayDetailPageState extends State<DayDetailPage> {
     required List<bool> selected,
     required void Function(int chipIdx, bool sel) onTap,
     bool singleSelect = false,
-  }) => Padding(
-    padding: const EdgeInsets.only(left: 8),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(
-            fontFamily: 'KBFGText',
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-            color: MainColors.kbDarkGray,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Wrap(
-          spacing: 3,
-          runSpacing: 2,
-          children: List.generate(items.length, (idx) {
-            return FilterChip(
-              label: Text(items[idx],
-                style: const TextStyle(
-                  fontFamily: 'KBFGText',
-                  fontSize: 13,
-                  fontWeight: FontWeight.w400,
-                ),
+  }) =>
+      Padding(
+        padding: const EdgeInsets.only(left: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                fontFamily: 'KBFGText',
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+                color: MainColors.kbDarkGray,
               ),
-              labelPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-              selected: selected[idx],
-              showCheckmark: false,
-              backgroundColor: Colors.grey.shade200,
-              selectedColor: MainColors.sheet3mVt10891,
-              elevation: 0.5,
-              shadowColor: Colors.black12,
-              shape: const StadiumBorder(side: BorderSide(color: Colors.transparent)),
-              onSelected: (sel) => onTap(idx, sel),
-            );
-          }),
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 3,
+              runSpacing: 2,
+              children: List.generate(items.length, (idx) {
+                return FilterChip(
+                  label: Text(
+                    items[idx],
+                    style: const TextStyle(
+                      fontFamily: 'KBFGText',
+                      fontSize: 13,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
+                  labelPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                  padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                  selected: selected[idx],
+                  showCheckmark: false,
+                  backgroundColor: Colors.grey.shade200,
+                  selectedColor: MainColors.sheet3mVt10891,
+                  elevation: 0.5,
+                  shadowColor: Colors.black12,
+                  shape: const StadiumBorder(side: BorderSide(color: Colors.transparent)),
+                  onSelected: (sel) {
+                    if (singleSelect) {
+                      for (int j = 0; j < selected.length; j++) {
+                        selected[j] = false;
+                      }
+                    }
+                    onTap(idx, sel);
+                  },
+                );
+              }),
+            ),
+          ],
         ),
-      ],
-    ),
-  );
+      );
 
   Widget _buildDoneButton(int i) => Center(
     child: ElevatedButton(
@@ -435,12 +513,11 @@ class _DayDetailPageState extends State<DayDetailPage> {
       child: const Text('완료'),
     ),
   );
+
   Widget _buildStatusBadge(bool created) {
-    final bgColor   = created ? MainColors.sheet3mVt10891.withOpacity(0.18)
-        : Colors.grey.shade200;
-    final borderCol = created ? MainColors.sheet3mVt10891
-        : Colors.grey.shade400;
-    final label     = created ? '생성됨' : '미작성';
+    final bgColor = created ? MainColors.sheet3mVt10891.withOpacity(0.18) : Colors.grey.shade200;
+    final borderCol = created ? MainColors.sheet3mVt10891 : Colors.grey.shade400;
+    final label = created ? '생성됨' : '미작성';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
@@ -452,7 +529,7 @@ class _DayDetailPageState extends State<DayDetailPage> {
       child: Text(
         label,
         style: const TextStyle(
-          fontFamily: 'KBFGText',   // ✅ KB 글씨체
+          fontFamily: 'KBFGText', // KB 글씨체
           fontWeight: FontWeight.w600,
           fontSize: 12,
           color: MainColors.kbDarkGray,
@@ -461,4 +538,33 @@ class _DayDetailPageState extends State<DayDetailPage> {
     );
   }
 
+  Widget _buildAiReportCta() => Padding(
+    padding: const EdgeInsets.fromLTRB(30, 8, 20, 30),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 8),
+        ElevatedButton.icon(
+          icon: _creatingReport
+              ? const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+              : const Icon(Icons.auto_awesome),
+          label: Text(_creatingReport ? '리포트를 생성 중이에요' : 'AI 리포트 생성'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: MainColors.sheet3mVt10891,
+            minimumSize: const Size.fromHeight(44),
+            textStyle: const TextStyle(
+              fontFamily: 'KBFGText',
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
+          ),
+          onPressed: _creatingReport ? null : _createDailyReport,
+        ),
+      ],
+    ),
+  );
 }
